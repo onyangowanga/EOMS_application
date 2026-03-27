@@ -1,7 +1,7 @@
 
 # EOMS - Events Operations Management System
 
-A comprehensive mobile-first platform for managing funeral and general event operations. Built with Django/DRF backend and ready for React Native or Flutter frontend.
+A comprehensive web platform for managing funeral and general event operations. Built with Django REST Framework backend and React TypeScript frontend.
 
 ## Features
 
@@ -13,6 +13,7 @@ A comprehensive mobile-first platform for managing funeral and general event ope
 - 📊 Comprehensive Reporting
 - 🔐 JWT Authentication with OTP verification
 - 🔔 Background tasks with Celery
+- 📱 Responsive web interface
 
 ## Tech Stack
 
@@ -23,26 +24,126 @@ A comprehensive mobile-first platform for managing funeral and general event ope
 - Redis (Celery broker)
 - JWT Authentication
 
+### Frontend
+- React 19 with TypeScript
+- Vite (build tool)
+- Material-UI (UI components)
+- React Router (routing)
+- TanStack Query (data fetching)
+- Axios (HTTP client)
+
 ### DevOps
 - Docker & Docker Compose
-- Gunicorn (Production)
+- Multi-stage Dockerfiles
 - Nginx (Production)
+- Gunicorn (Production)
 
-## Quick Start (Local Development)
+## Quick Start (Docker - Recommended)
 
 ### Prerequisites
 - Docker & Docker Compose installed
 - Git
 
-### 1. Clone the repository
+### Development Mode
+
 ```bash
+# 1. Clone the repository
 git clone <repository-url>
 cd eoms
+
+# 2. Start all services (backend + frontend + database)
+docker-compose up
+
+# 3. In another terminal, run migrations
+docker-compose exec backend python manage.py migrate
+
+# 4. Create a superuser
+docker-compose exec backend python manage.py createsuperuser
+``React frontend (port 5173)
+- Celery worker
+- Celery beat
+
+## Project Structure
+
+```
+eoms/
+├── backend/              # Django REST API
+│   ├── apps/            # Django apps (users, committees, tasks, etc.)
+│   ├── eoms_api/        # Project settings
+│   ├── Dockerfile       # Backend container
+│   └── requirements.txt
+├── frontend/            # React TypeScript app
+│   ├── src/
+│   │   ├── components/  # Reusable UI components
+│   │   ├── contexts/    # React contexts (auth, etc.)
+│   │   ├── pages/       # Page components
+│   │   ├── services/    # API service layer
+│   │   └── types/       # TypeScript definitions
+│   ├── Dockerfile       # Frontend multi-stage build
+│   ├── nginx.conf       # Production nginx config
+│   └── package.json
+├── docker/              # Docker configurations
+├── docs/                # Documentation
+├── docker-compose.yml       # Development compose
+├── docker-compose.prod.yml  # Production compose
+└── README.md
+```
+**Access the application:**
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:8000/api/
+- Admin Panel: http://localhost:8000/admin/
+
+### Production Mode
+
+```bash
+# 1. Setup environment variables
+cp .env.prod.example .env.prod
+# Edit .env.prod with your secure values
+
+# 2. Build and start services
+docker-compose -f docker-compose.prod.yml up -d --build
+
+# 3. Run migrations
+docker-compose -f docker-compose.prod.yml exec backend python manage.py migrate
+
+# 4. Create superuser
+docker-compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser
+
+# 5. Collect static files
+docker-compose -f docker-compose.prod.yml exec backend python manage.py collectstatic
 ```
 
-### 2. Start the services
+**Access the application:**
+- Full Application: http://localhost (Nginx serves frontend + proxies API)
+
+📖 **For detailed Docker instructions, see [DOCKER.md](DOCKER.md)**
+
+## Quick Start (Local Development - Without Docker)
+
+### Prerequisites
+- Python 3.11+
+- Node.js 18+
+- PostgreSQL 16
+- Redis
+
+### Backend Setup
+
 ```bash
-docker-compose up -d
+cd backend
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py createsuperuser
+python manage.py runserver
+```
+
+### Frontend Setup
+
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
 This will start:
