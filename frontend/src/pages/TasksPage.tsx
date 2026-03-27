@@ -43,8 +43,8 @@ const TasksPage: React.FC = () => {
   const [formData, setFormData] = useState<Partial<TaskCreate>>({
     title: '',
     description: '',
-    committee: undefined,
-    assigned_to: undefined,
+    committee_id: undefined,
+    assigned_to_id: undefined,
     priority: 'MEDIUM',
     deadline: '',
   });
@@ -79,8 +79,8 @@ const TasksPage: React.FC = () => {
     setFormData({
       title: '',
       description: '',
-      committee: undefined,
-      assigned_to: undefined,
+      committee_id: undefined,
+      assigned_to_id: undefined,
       priority: 'MEDIUM',
       deadline: '',
     });
@@ -88,7 +88,7 @@ const TasksPage: React.FC = () => {
   };
 
   const handleSubmit = () => {
-    if (!formData.title || !formData.description || !formData.committee) {
+    if (!formData.title || !formData.description || !formData.committee_id) {
       setError('Please fill in all required fields');
       return;
     }
@@ -302,8 +302,8 @@ const TasksPage: React.FC = () => {
             <FormControl fullWidth required>
               <InputLabel>Committee</InputLabel>
               <Select
-                value={formData.committee || ''}
-                onChange={(e) => setFormData({ ...formData, committee: e.target.value as number })}
+                value={formData.committee_id || ''}
+                onChange={(e) => setFormData({ ...formData, committee_id: e.target.value as number })}
                 label="Committee"
               >
                 {committees?.map((committee: Committee) => (

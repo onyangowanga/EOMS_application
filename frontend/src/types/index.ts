@@ -85,8 +85,8 @@ export interface TaskComment {
 export interface TaskCreate {
   title: string;
   description: string;
-  committee: number;
-  assigned_to?: number;
+  committee_id: number;
+  assigned_to_id?: number;
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
   deadline?: string;
 }
@@ -106,7 +106,7 @@ export interface Collection {
 }
 
 export interface CollectionCreate {
-  committee: number;
+  committee_id: number;
   payer_name: string;
   payer_phone?: string;
   amount: number;
@@ -131,7 +131,7 @@ export interface Expense {
 }
 
 export interface ExpenseCreate {
-  committee: number;
+  committee_id: number;
   vendor: string;
   amount: number;
   category: 'TRANSPORT' | 'FOOD' | 'VENUE' | 'EQUIPMENT' | 'SERVICE' | 'MATERIALS' | 'OTHER';
@@ -164,7 +164,7 @@ export interface ServiceProvider {
 }
 
 export interface ServiceProviderCreate {
-  committee: number;
+  committee_id: number;
   name: string;
   provider_type: 'MORTUARY' | 'TRANSPORT' | 'CATERING' | 'VENUE' | 'EQUIPMENT' | 'PRINTING' | 'MUSIC' | 'OTHER';
   contact_person?: string;

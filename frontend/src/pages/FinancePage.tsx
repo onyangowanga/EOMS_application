@@ -49,7 +49,7 @@ const FinancePage: React.FC = () => {
   const [error, setError] = useState('');
   
   const [collectionData, setCollectionData] = useState<Partial<CollectionCreate>>({
-    committee: undefined,
+    committee_id: undefined,
     payer_name: '',
     payer_phone: '',
     amount: 0,
@@ -58,7 +58,7 @@ const FinancePage: React.FC = () => {
   });
 
   const [expenseData, setExpenseData] = useState<Partial<ExpenseCreate>>({
-    committee: undefined,
+    committee_id: undefined,
     vendor: '',
     amount: 0,
     category: 'VENUE',
@@ -126,7 +126,7 @@ const FinancePage: React.FC = () => {
 
   const resetCollectionForm = () => {
     setCollectionData({
-      committee: undefined,
+      committee_id: undefined,
       payer_name: '',
       payer_phone: '',
       amount: 0,
@@ -138,7 +138,7 @@ const FinancePage: React.FC = () => {
 
   const resetExpenseForm = () => {
     setExpenseData({
-      committee: undefined,
+      committee_id: undefined,
       vendor: '',
       amount: 0,
       category: 'VENUE',
@@ -148,7 +148,7 @@ const FinancePage: React.FC = () => {
   };
 
   const handleCreateCollection = () => {
-    if (!collectionData.committee || !collectionData.payer_name || !collectionData.amount) {
+    if (!collectionData.committee_id || !collectionData.payer_name || !collectionData.amount) {
       setError('Please fill in all required fields');
       return;
     }
@@ -156,7 +156,7 @@ const FinancePage: React.FC = () => {
   };
 
   const handleCreateExpense = () => {
-    if (!expenseData.committee || !expenseData.vendor || !expenseData.amount) {
+    if (!expenseData.committee_id || !expenseData.vendor || !expenseData.amount) {
       setError('Please fill in all required fields');
       return;
     }
@@ -434,9 +434,9 @@ const FinancePage: React.FC = () => {
             <FormControl fullWidth required>
               <InputLabel>Committee</InputLabel>
               <Select
-                value={collectionData.committee || ''}
+                value={collectionData.committee_id || ''}
                 onChange={(e) =>
-                  setCollectionData({ ...collectionData, committee: e.target.value as number })
+                  setCollectionData({ ...collectionData, committee_id: e.target.value as number })
                 }
                 label="Committee"
               >
@@ -529,9 +529,9 @@ const FinancePage: React.FC = () => {
             <FormControl fullWidth required>
               <InputLabel>Committee</InputLabel>
               <Select
-                value={expenseData.committee || ''}
+                value={expenseData.committee_id || ''}
                 onChange={(e) =>
-                  setExpenseData({ ...expenseData, committee: e.target.value as number })
+                  setExpenseData({ ...expenseData, committee_id: e.target.value as number })
                 }
                 label="Committee"
               >

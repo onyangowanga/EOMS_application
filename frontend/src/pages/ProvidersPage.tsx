@@ -43,7 +43,7 @@ const ProvidersPage: React.FC = () => {
   const [filterType, setFilterType] = useState<string>('ALL');
   const [error, setError] = useState('');
   const [formData, setFormData] = useState<Partial<ServiceProviderCreate>>({
-    committee: undefined,
+    committee_id: undefined,
     provider_type: 'MORTUARY',
     name: '',
     contact_person: '',
@@ -80,7 +80,7 @@ const ProvidersPage: React.FC = () => {
 
   const resetForm = () => {
     setFormData({
-      committee: undefined,
+      committee_id: undefined,
       provider_type: 'MORTUARY',
       name: '',
       contact_person: '',
@@ -92,7 +92,7 @@ const ProvidersPage: React.FC = () => {
   };
 
   const handleSubmit = () => {
-    if (!formData.committee || !formData.name || !formData.phone) {
+    if (!formData.committee_id || !formData.name || !formData.phone) {
       setError('Please fill in all required fields');
       return;
     }
@@ -243,8 +243,8 @@ const ProvidersPage: React.FC = () => {
             <FormControl fullWidth required>
               <InputLabel>Committee</InputLabel>
               <Select
-                value={formData.committee || ''}
-                onChange={(e) => setFormData({ ...formData, committee: e.target.value as number })}
+                value={formData.committee_id || ''}
+                onChange={(e) => setFormData({ ...formData, committee_id: e.target.value as number })}
                 label="Committee"
               >
                 {committees?.map((committee) => (
