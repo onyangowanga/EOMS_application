@@ -303,7 +303,7 @@ const TasksPage: React.FC = () => {
               <InputLabel>Committee</InputLabel>
               <Select
                 value={formData.committee_id || ''}
-                onChange={(e) => setFormData({ ...formData, committee_id: e.target.value as number })}
+                onChange={(e) => setFormData({ ...formData, committee_id: Number(e.target.value) })}
                 label="Committee"
               >
                 {committees?.map((committee: Committee) => (

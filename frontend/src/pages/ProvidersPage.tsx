@@ -244,7 +244,7 @@ const ProvidersPage: React.FC = () => {
               <InputLabel>Committee</InputLabel>
               <Select
                 value={formData.committee_id || ''}
-                onChange={(e) => setFormData({ ...formData, committee_id: e.target.value as number })}
+                onChange={(e) => setFormData({ ...formData, committee_id: Number(e.target.value) })}
                 label="Committee"
               >
                 {committees?.map((committee) => (
@@ -305,9 +305,10 @@ const ProvidersPage: React.FC = () => {
               type="number"
               fullWidth
               value={formData.cost_estimate}
-              onChange={(e) =>
-                setFormData({ ...formData, cost_estimate: parseFloat(e.target.value) })
-              }
+              onChange={(e) => {
+                const value = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                setFormData({ ...formData, cost_estimate: isNaN(value) ? 0 : value });
+              }}
             />
           </Box>
 

@@ -436,7 +436,7 @@ const FinancePage: React.FC = () => {
               <Select
                 value={collectionData.committee_id || ''}
                 onChange={(e) =>
-                  setCollectionData({ ...collectionData, committee_id: e.target.value as number })
+                  setCollectionData({ ...collectionData, committee_id: Number(e.target.value) })
                 }
                 label="Committee"
               >
@@ -531,7 +531,7 @@ const FinancePage: React.FC = () => {
               <Select
                 value={expenseData.committee_id || ''}
                 onChange={(e) =>
-                  setExpenseData({ ...expenseData, committee_id: e.target.value as number })
+                  setExpenseData({ ...expenseData, committee_id: Number(e.target.value) })
                 }
                 label="Committee"
               >
