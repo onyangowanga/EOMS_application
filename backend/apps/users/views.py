@@ -7,14 +7,18 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
 import random
+import logging
 
 from .models import OTP
 from .serializers import (
     UserSerializer, UserCreateSerializer, LoginSerializer,
     VerifyOTPSerializer, ChangePasswordSerializer
 )
+from .sms import send_otp_sms
+from .email_service import send_otp_email
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -29,30 +33,86 @@ class UserViewSet(viewsets.ModelViewSet):
             return UserCreateSerializer
         return UserSerializer
     
+    def create(self, request, *args, **kwargs):
+        """Override create to add detailed error logging"""
+        logger.info(f"Creating user with data: {request.data}")
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            logger.error(f"User creation validation failed: {serializer.errors}")
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            self.perform_create(serializer)
+            headers = self.get_success_headers(serializer.data)
+            return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+        except Exception as e:
+            logger.error(f"User creation exception: {str(e)}")
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def login(self, request):
-        """Request OTP for login"""
+        """Request OTP for login - user provides identifier (username/phone) and chooses delivery method"""
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        phone = serializer.validated_data['phone']
+        identifier = serializer.validated_data['identifier']
+        delivery_method = serializer.validated_data['delivery_method']
+        
+        # Lookup user by phone or username
+        from django.db.models import Q
+        try:
+            user = User.objects.get(
+                Q(phone=identifier) | Q(username=identifier)
+            )
+        except User.DoesNotExist:
+            return Response({
+                'error': 'User not found with provided identifier'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except User.MultipleObjectsReturned:
+            # In case of multiple matches, try exact match first
+            user = User.objects.filter(phone=identifier).first() or \
+                   User.objects.filter(username=identifier).first()
+        
+        # Validate user has contact for chosen delivery method
+        if delivery_method == 'sms':
+            if not user.phone:
+                return Response({
+                    'error': 'No phone number registered for this user'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            contact = user.phone
+        else:  # email
+            if not user.email:
+                return Response({
+                    'error': 'No email registered for this user'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            contact = user.email
         
         # Generate 6-digit OTP
         otp_code = str(random.randint(100000, 999999))
         
-        # Create OTP record
+        # Create OTP record with the appropriate field
         otp = OTP.objects.create(
-            phone=phone,
+            phone=user.phone if delivery_method == 'sms' else None,
+            email=user.email if delivery_method == 'email' else None,
             otp_code=otp_code,
             expires_at=timezone.now() + timedelta(minutes=10)
         )
         
-        # TODO: Send OTP via SMS (integrate SMS service)
-        # For development, return OTP in response
+        # Send OTP via chosen method
+        if delivery_method == 'sms':
+            sent = send_otp_sms(contact, otp_code)
+        else:
+            sent = send_otp_email(contact, otp_code)
+        
+        if not sent:
+            logger.warning(f"Failed to send {delivery_method} to {contact}, but OTP created in database")
+        
         return Response({
-            'message': 'OTP sent successfully',
-            'otp': otp_code if User.objects.filter(phone=phone).exists() else None,
-            'dev_mode': True
+            'message': f'OTP sent to your registered {delivery_method}' if sent else f'OTP generated but {delivery_method} sending failed',
+            'sent': sent,
+            'method': delivery_method,
+            # Only return OTP in development mode when sending fails
+            'otp': otp_code if not sent else None
         }, status=status.HTTP_200_OK)
     
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
@@ -61,13 +121,27 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer = VerifyOTPSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        phone = serializer.validated_data['phone']
+        identifier = serializer.validated_data['identifier']
         otp_code = serializer.validated_data['otp_code']
         
-        # Find valid OTP
+        # First, find the user by identifier (phone or username)
+        from django.db.models import Q
+        try:
+            user = User.objects.get(
+                Q(phone=identifier) | Q(username=identifier)
+            )
+        except User.DoesNotExist:
+            return Response({
+                'error': 'User not found with provided identifier'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except User.MultipleObjectsReturned:
+            user = User.objects.filter(phone=identifier).first() or \
+                   User.objects.filter(username=identifier).first()
+        
+        # Find valid OTP using user's phone OR email
         try:
             otp = OTP.objects.filter(
-                phone=phone,
+                Q(phone=user.phone) | Q(email=user.email),
                 otp_code=otp_code,
                 is_verified=False
             ).latest('created_at')
@@ -85,13 +159,8 @@ class UserViewSet(viewsets.ModelViewSet):
         otp.is_verified = True
         otp.save()
         
-        # Get or create user
-        user, created = User.objects.get_or_create(
-            phone=phone,
-            defaults={'full_name': phone}  # Default name, should be updated
-        )
-        
-        if created:
+        # Mark user as verified if not already
+        if not user.is_verified:
             user.is_verified = True
             user.save()
         

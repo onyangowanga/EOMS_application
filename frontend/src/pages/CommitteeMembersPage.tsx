@@ -1,0 +1,747 @@
+import React, { useState } from 'react';
+import {
+  Box,
+  Paper,
+  Typography,
+  Button,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  IconButton,
+  Chip,
+  Alert,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Autocomplete,
+  FormControlLabel,
+  Checkbox,
+  MenuItem,
+  Select,
+  FormControl,
+  InputLabel,
+  Tooltip,
+  Skeleton,
+  Card,
+  CardContent,
+  Grid,
+  Tabs,
+  Tab,
+  Divider,
+  Snackbar,
+} from '@mui/material';
+import {
+  Add,
+  Delete,
+  People,
+  Star,
+  ArrowBack,
+  PersonAdd,
+  GroupAdd,
+} from '@mui/icons-material';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useParams, useNavigate } from 'react-router-dom';
+import { committeeService } from '../services/committee.service';
+import { eventService } from '../services/event.service';
+import { userService, type CreateUserRequest } from '../services/user.service';
+import type { CommitteePhase6, EventMember } from '../types';
+
+/**
+ * Committee Members Page
+ * 
+ * Displays all committee members across all committees for an event.
+ * Allows adding/removing members and assigning them to committees.
+ */
+const CommitteeMembersPage: React.FC = () => {
+  const { eventId } = useParams<{ eventId: string }>();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [selectedCommittee, setSelectedCommittee] = useState<string | null>(null);
+  const [selectedUser, setSelectedUser] = useState<EventMember | null>(null);
+  const [isLead, setIsLead] = useState(false);
+  const [roleDescription, setRoleDescription] = useState('');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [memberToDelete, setMemberToDelete] = useState<{ committeeId: string; userId: number; name: string } | null>(null);
+  
+  // Error and success notifications
+  const [userCreationError, setUserCreationError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  
+  // New user creation fields
+  const [creationMode, setCreationMode] = useState<'existing' | 'new'>('new');
+  const [newUserData, setNewUserData] = useState<CreateUserRequest>({
+    full_name: '',
+    phone: '',
+    email: '',
+    role: 'MEMBER',
+  });
+
+  // Fetch all committees for this event
+  const { data: committees, isLoading: loadingCommittees, error: errorCommittees } = useQuery({
+    queryKey: ['committees', eventId],
+    queryFn: async () => {
+      return await eventService.getEventCommittees(eventId!);
+    },
+    enabled: !!eventId,
+  });
+
+  // Fetch all event members (users)
+  const { data: eventMembers, isLoading: loadingMembers } = useQuery({
+    queryKey: ['event-members', eventId],
+    queryFn: () => eventService.getEventMembers(eventId!),
+    enabled: !!eventId,
+  });
+
+  // Fetch members for each committee
+  const { data: allCommitteeMembers, isLoading: loadingCommitteeMembers } = useQuery({
+    queryKey: ['all-committee-members', eventId, committees],
+    queryFn: async () => {
+      if (!committees) return [];
+      
+      const membersPromises = committees.map(async (committee: CommitteePhase6) => {
+        try {
+          const members = await committeeService.getMembers(parseInt(committee.id));
+          return members.map(member => ({
+            ...member,
+            committee,
+          }));
+        } catch (error) {
+          console.error(`Failed to fetch members for committee ${committee.id}:`, error);
+          return [];
+        }
+      });
+      
+      const membersArrays = await Promise.all(membersPromises);
+      return membersArrays.flat();
+    },
+    enabled: !!committees && committees.length > 0,
+  });
+
+  // Add member mutation
+  const addMemberMutation = useMutation({
+    mutationFn: async ({ committeeId, data }: { committeeId: string; data: any }) =>
+      committeeService.addMember(parseInt(committeeId), data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['committees', eventId] });
+      queryClient.invalidateQueries({ queryKey: ['all-committee-members', eventId] });
+      queryClient.invalidateQueries({ queryKey: ['event-members', eventId] });
+      setSuccessMessage('Member added successfully!');
+      setAddDialogOpen(false);
+      resetForm();
+    },
+  });
+
+  // Remove member mutation
+  const removeMemberMutation = useMutation({
+    mutationFn: ({ committeeId, userId }: { committeeId: string; userId: number }) =>
+      committeeService.removeMember(parseInt(committeeId), userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['all-committee-members', eventId] });
+      queryClient.invalidateQueries({ queryKey: ['committees', eventId] });
+      setSuccessMessage('Member removed successfully!');
+      setDeleteDialogOpen(false);
+      setMemberToDelete(null);
+    },
+  });
+
+  const resetForm = () => {
+    setSelectedCommittee(null);
+    setSelectedUser(null);
+    setIsLead(false);
+    setRoleDescription('');
+    setCreationMode('new');
+    setUserCreationError(null);
+    setNewUserData({
+      full_name: '',
+      phone: '',
+      email: '',
+      role: 'MEMBER',
+    });
+  };
+
+  const handleAddMember = async () => {
+    if (!selectedCommittee) return;
+
+    // Clear previous errors
+    setUserCreationError(null);
+
+    try {
+      let userId: number;
+
+      if (creationMode === 'new') {
+        // Create new user first
+        if (!newUserData.full_name || !newUserData.phone) {
+          setUserCreationError('Full name and phone number are required');
+          return;
+        }
+
+        // Create user without username (it's optional)
+        const userPayload = {
+          full_name: newUserData.full_name,
+          phone: newUserData.phone,
+          email: newUserData.email || undefined,
+          role: newUserData.role,
+        };
+
+        try {
+          const newUser = await userService.create(userPayload);
+          userId = newUser.id;
+        } catch (userError: any) {
+          // Handle user creation errors (e.g., duplicate phone)
+          const errorMsg = userError?.response?.data?.phone?.[0] || 
+                           userError?.response?.data?.email?.[0] ||
+                           userError?.response?.data?.error ||
+                           'Failed to create user. Please check the form and try again.';
+          setUserCreationError(errorMsg);
+          return; // Stop execution here
+        }
+
+        // Map user role to event member role (EventMember uses different roles)
+        const eventRole =
+          newUserData.role === 'LEADER'
+            ? 'CHAIRMAN'
+            : newUserData.role === 'FINANCE'
+            ? 'TREASURER'
+            : 'MEMBER';
+
+        // Add user to event
+        await eventService.addEventMember(eventId!, userId, eventRole);
+      } else {
+        // Use existing user
+        if (!selectedUser) return;
+        userId = selectedUser.user_details.id;
+      }
+
+      // Add member to committee
+      await addMemberMutation.mutateAsync({
+        committeeId: selectedCommittee,
+        data: {
+          user_id: userId,
+          is_lead: isLead,
+          role_description: roleDescription,
+        },
+      });
+    } catch (error: any) {
+      console.error('Error adding member:', error);
+      // Set error for display
+      const errorMsg = error?.response?.data?.error || error?.message || 'Failed to add member to committee';
+      setUserCreationError(errorMsg);
+    }
+  };
+
+  const handleDeleteClick = (committeeId: string, userId: number, userName: string) => {
+    setMemberToDelete({ committeeId, userId, name: userName });
+    setDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!memberToDelete) return;
+    removeMemberMutation.mutate({
+      committeeId: memberToDelete.committeeId,
+      userId: memberToDelete.userId,
+    });
+  };
+
+  // Flatten all committee members with their committee info
+  const allMembers = React.useMemo(() => {
+    return allCommitteeMembers || [];
+  }, [allCommitteeMembers]);
+
+  // Calculate statistics
+  const stats = React.useMemo(() => {
+    const uniqueUsers = new Set(allMembers.map(m => m.user.id));
+    const leadCount = allMembers.filter(m => m.is_lead).length;
+    
+    return {
+      totalMembers: uniqueUsers.size,
+      totalMemberships: allMembers.length,
+      leadCount,
+      committeeCount: committees?.length || 0,
+    };
+  }, [allMembers, committees]);
+
+  if (loadingCommittees || loadingMembers || loadingCommitteeMembers) {
+    return <LoadingSkeleton />;
+  }
+
+  if (errorCommittees) {
+    return (
+      <Alert severity="error">
+        Failed to load committee data. Please try again.
+      </Alert>
+    );
+  }
+
+  return (
+    <Box sx={{ px: { xs: 2, sm: 3 }, py: 2 }}>
+      {/* Header */}
+      <Box 
+        display="flex" 
+        flexDirection={{ xs: 'column', sm: 'row' }}
+        justifyContent="space-between" 
+        alignItems={{ xs: 'stretch', sm: 'center' }}
+        gap={2}
+        mb={3}
+      >
+        <Box display="flex" alignItems="center" gap={2}>
+          <IconButton onClick={() => navigate(`/events/${eventId}/dashboard`)}>
+            <ArrowBack />
+          </IconButton>
+          <Box>
+            <Typography variant="h5" sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }}>
+              Committee Members
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>
+              Manage all committee members for this event
+            </Typography>
+          </Box>
+        </Box>
+        <Button
+          variant="contained"
+          startIcon={<Add />}
+          onClick={() => setAddDialogOpen(true)}
+          fullWidth={{ xs: true, sm: false } as any}
+          sx={{ minWidth: { sm: 'auto' } }}
+        >
+          <Box component="span" sx={{ display: { xs: 'inline', sm: 'inline' } }}>
+            Add Member
+          </Box>
+        </Button>
+      </Box>
+
+      {/* Statistics Cards */}
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" gap={2}>
+                <People sx={{ color: '#1976d2', fontSize: 40}} />
+                <Box>
+                  <Typography color="text.secondary" variant="body2">
+                    Unique Members
+                  </Typography>
+                  <Typography variant="h4">{stats.totalMembers}</Typography>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" gap={2}>
+                <Star sx={{ color: '#f57c00', fontSize: 40 }} />
+                <Box>
+                  <Typography color="text.secondary" variant="body2">
+                    Committee Leads
+                  </Typography>
+                  <Typography variant="h4">{stats.leadCount}</Typography>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" gap={2}>
+                <People sx={{ color: '#388e3c', fontSize: 40 }} />
+                <Box>
+                  <Typography color="text.secondary" variant="body2">
+                    Total Memberships
+                  </Typography>
+                  <Typography variant="h4">{stats.totalMemberships}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    (including multi-committee)
+                  </Typography>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" gap={2}>
+                <People sx={{ color: '#7b1fa2', fontSize: 40 }} />
+                <Box>
+                  <Typography color="text.secondary" variant="body2">
+                    Committees
+                  </Typography>
+                  <Typography variant="h4">{stats.committeeCount}</Typography>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* Members Table */}
+      <Paper sx={{ width: '100%', overflow: 'hidden' }}>
+        <TableContainer sx={{ maxHeight: { xs: 'calc(100vh - 400px)', sm: 'none' }, overflowX: 'auto' }}>
+          <Table stickyHeader sx={{ minWidth: { xs: 650, sm: 750 } }}>
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ fontWeight: 'bold' }}>Name</TableCell>
+                <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Phone</TableCell>
+                <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Email</TableCell>
+                <TableCell>Committee</TableCell>
+                <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Role</TableCell>
+                <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Status</TableCell>
+                <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Joined</TableCell>
+                <TableCell align="right">Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {allMembers.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} align="center">
+                    <Typography variant="body2" color="text.secondary" sx={{ py: 4 }}>
+                      No committee members yet. Click "Add Member" to get started.
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                allMembers.map((member) => (
+                  <TableRow key={`${member.committee.id}-${member.user.id}`} hover>
+                    <TableCell>
+                      <Box>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <Typography variant="body2" fontWeight="medium">
+                            {member.user.full_name || member.user.phone}
+                          </Typography>
+                          {member.is_lead && (
+                            <Tooltip title="Committee Lead">
+                              <Star sx={{ color: '#f57c00', fontSize: 18 }} />
+                            </Tooltip>
+                          )}
+                        </Box>
+                        {/* Mobile: Show phone and role below name */}
+                        <Box sx={{ display: { xs: 'block', sm: 'none' }, mt: 0.5 }}>
+                          <Typography variant="caption" color="text.secondary">
+                            {member.user.phone}
+                          </Typography>
+                          {member.role_description && (
+                            <Typography variant="caption" display="block" color="text.secondary">
+                              {member.role_description}
+                            </Typography>
+                          )}
+                        </Box>
+                      </Box>
+                    </TableCell>
+                    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
+                      <Typography variant="body2">{member.user.phone}</Typography>
+                    </TableCell>
+                    <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
+                      <Typography variant="body2" color="text.secondary">
+                        {member.user.email || 'N/A'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={member.committee.committee_type_display}
+                        size="small"
+                        variant="outlined"
+                        color="primary"
+                        sx={{ fontSize: { xs: '0.7rem', sm: '0.8125rem' } }}
+                      />
+                    </TableCell>
+                    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
+                      <Typography variant="body2" color="text.secondary">
+                        {member.role_description || (member.is_lead ? 'Lead' : 'Member')}
+                      </Typography>
+                    </TableCell>
+                    <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
+                      <Chip
+                        label={member.is_lead ? 'Lead' : 'Member'}
+                        size="small"
+                        color={member.is_lead ? 'warning' : 'default'}
+                      />
+                    </TableCell>
+                    <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
+                      <Typography variant="body2" color="text.secondary">
+                        {new Date(member.joined_at).toLocaleDateString()}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Tooltip title="Remove from committee">
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() =>
+                            handleDeleteClick(
+                              member.committee.id,
+                              member.user.id,
+                              member.user.full_name || member.user.phone
+                            )
+                          }
+                        >
+                          <Delete fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
+
+      {/* Add Member Dialog */}
+      <Dialog 
+        open={addDialogOpen} 
+        onClose={() => { setAddDialogOpen(false); resetForm(); }} 
+        maxWidth="sm" 
+        fullWidth
+        fullScreen={{ xs: true, sm: false } as any}
+        PaperProps={{
+          sx: {
+            m: { xs: 0, sm: 2 },
+            maxHeight: { xs: '100%', sm: '90vh' }
+          }
+        }}
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <PersonAdd />
+            <Typography variant="h6" sx={{ fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
+              Add Committee Member
+            </Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {/* Mode Selection Tabs */}
+            <Tabs
+              value={creationMode}
+              onChange={(_, newValue) => setCreationMode(newValue)}
+              variant="fullWidth"
+            >
+              <Tab
+                value="new"
+                label="Create New User"
+                icon={<PersonAdd />}
+                iconPosition="start"
+              />
+              <Tab
+                value="existing"
+                label="Select Existing"
+                icon={<GroupAdd />}
+                iconPosition="start"
+              />
+            </Tabs>
+
+            <Divider />
+
+            {/* Committee Selection (common for both modes) */}
+            <FormControl fullWidth>
+              <InputLabel>Committee *</InputLabel>
+              <Select
+                value={selectedCommittee || ''}
+                onChange={(e) => setSelectedCommittee(e.target.value as string)}
+                label="Committee *"
+              >
+                {committees?.map((committee: CommitteePhase6) => (
+                  <MenuItem key={committee.id} value={committee.id}>
+                    {committee.committee_type_display}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {/* Create New User Mode */}
+            {creationMode === 'new' && (
+              <>
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  Create a new user and add them to the selected committee
+                </Alert>
+
+                <TextField
+                  label="Full Name *"
+                  value={newUserData.full_name}
+                  onChange={(e) => setNewUserData({ ...newUserData, full_name: e.target.value })}
+                  fullWidth
+                  required
+                  placeholder="e.g., John Doe"
+                />
+
+                <TextField
+                  label="Phone Number *"
+                  value={newUserData.phone}
+                  onChange={(e) => setNewUserData({ ...newUserData, phone: e.target.value })}
+                  fullWidth
+                  required
+                  placeholder="e.g., +254712345678"
+                  helperText="Include country code"
+                />
+
+                <TextField
+                  label="Email (Optional)"
+                  type="email"
+                  value={newUserData.email}
+                  onChange={(e) => setNewUserData({ ...newUserData, email: e.target.value })}
+                  fullWidth
+                  placeholder="e.g., john@example.com"
+                />
+
+                <FormControl fullWidth>
+                  <InputLabel>User Role</InputLabel>
+                  <Select
+                    value={newUserData.role}
+                    onChange={(e) =>
+                      setNewUserData({
+                        ...newUserData,
+                        role: e.target.value as any,
+                      })
+                    }
+                    label="User Role"
+                  >
+                    <MenuItem value="MEMBER">Member</MenuItem>
+                    <MenuItem value="LEADER">Leader</MenuItem>
+                    <MenuItem value="FINANCE">Finance Officer</MenuItem>
+                    <MenuItem value="ADMIN">Admin</MenuItem>
+                    <MenuItem value="STAKEHOLDER">Stakeholder</MenuItem>
+                  </Select>
+                </FormControl>
+              </>
+            )}
+
+            {/* Select Existing User Mode */}
+            {creationMode === 'existing' && (
+              <>
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  Select an existing event member to add to the committee
+                </Alert>
+
+                <Autocomplete
+                  options={eventMembers || []}
+                  getOptionLabel={(option) => option.user_details.full_name || option.user_details.phone}
+                  value={selectedUser}
+                  onChange={(_, newValue) => setSelectedUser(newValue)}
+                  renderInput={(params) => (
+                    <TextField {...params} label="Select User *" placeholder="Search by name or phone" />
+                  )}
+                  renderOption={(props, option) => (
+                    <li {...props} key={option.id}>
+                      <Box>
+                        <Typography variant="body2">{option.user_details.full_name || option.user_details.phone}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {option.user_details.phone}
+                        </Typography>
+                      </Box>
+                    </li>
+                  )}
+                />
+              </>
+            )}
+
+            {/* Role Description (common for both modes) */}
+            <TextField
+              label="Role Description (Optional)"
+              value={roleDescription}
+              onChange={(e) => setRoleDescription(e.target.value)}
+              placeholder="e.g., Coordinator, Secretary, etc."
+              fullWidth
+              multiline
+              rows={2}
+            />
+
+            {/* Is Lead Checkbox (common for both modes) */}
+            <FormControlLabel
+              control={<Checkbox checked={isLead} onChange={(e) => setIsLead(e.target.checked)} />}
+              label="Assign as Committee Lead"
+            />
+
+            {/* Error Display */}
+            {(userCreationError || addMemberMutation.isError) && (
+              <Alert severity="error">
+                {userCreationError ||
+                 (addMemberMutation.error as any)?.message ||
+                 (addMemberMutation.error as any)?.response?.data?.error ||
+                 'Failed to add member. Please try again.'}
+              </Alert>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setAddDialogOpen(false); resetForm(); }}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleAddMember}
+            disabled={
+              !selectedCommittee ||
+              (creationMode === 'new' && (!newUserData.full_name || !newUserData.phone)) ||
+              (creationMode === 'existing' && !selectedUser) ||
+              addMemberMutation.isPending
+            }
+          >
+            {addMemberMutation.isPending ? 'Adding...' : 'Add Member'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+        <DialogTitle>Remove Committee Member?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to remove <strong>{memberToDelete?.name}</strong> from this committee?
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={handleConfirmDelete}
+            disabled={removeMemberMutation.isPending}
+          >
+            {removeMemberMutation.isPending ? 'Removing...' : 'Remove'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Success Snackbar */}
+      <Snackbar
+        open={!!successMessage}
+        autoHideDuration={4000}
+        onClose={() => setSuccessMessage(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={() => setSuccessMessage(null)} severity="success" sx={{ width: '100%' }}>
+          {successMessage}
+        </Alert>
+      </Snackbar>
+    </Box>
+  );
+};
+
+// Loading Skeleton
+const LoadingSkeleton: React.FC = () => {
+  return (
+    <Box>
+      <Skeleton variant="rectangular" height={60} sx={{ mb: 3 }} />
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        {[1, 2, 3, 4].map((i) => (
+          <Grid item xs={12} sm={6} md={3} key={i}>
+            <Skeleton variant="rectangular" height={100} />
+          </Grid>
+        ))}
+      </Grid>
+      <Skeleton variant="rectangular" height={400} />
+    </Box>
+  );
+};
+
+export default CommitteeMembersPage;

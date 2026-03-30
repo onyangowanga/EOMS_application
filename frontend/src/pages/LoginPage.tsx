@@ -8,11 +8,17 @@ import {
   Typography,
   Paper,
   Alert,
+  FormControl,
+  FormLabel,
+  RadioGroup,
+  FormControlLabel,
+  Radio,
 } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
 
 const LoginPage: React.FC = () => {
-  const [phone, setPhone] = useState('');
+  const [identifier, setIdentifier] = useState('');
+  const [deliveryMethod, setDeliveryMethod] = useState<'sms' | 'email'>('sms');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
@@ -24,9 +30,9 @@ const LoginPage: React.FC = () => {
     setLoading(true);
 
     try {
-      await login(phone);
+      await login(identifier, deliveryMethod);
       // Navigate to OTP verification page
-      navigate('/verify-otp', { state: { phone } });
+      navigate('/verify-otp', { state: { identifier, deliveryMethod } });
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to send OTP');
     } finally {
@@ -44,30 +50,45 @@ const LoginPage: React.FC = () => {
         py={4}
       >
         <Paper elevation={3} sx={{ p: 4 }}>
-          <Typography variant="h4" component="h1" gutterBottom align="center">
-            EOMS
-          </Typography>
+          <Box display="flex" justifyContent="center" mb={2}>
+            <img 
+              src="/favicon_io/android-chrome-192x192.png" 
+              alt="EOMS Logo" 
+              style={{ width: '120px', height: '120px' }}
+            />
+          </Box>
           <Typography variant="h6" gutterBottom align="center" color="text.secondary">
             Events Operations Management
           </Typography>
           
           <Box mt={4}>
             <Typography variant="body1" gutterBottom>
-              Sign in with your phone number
+              Sign in with your phone number or username
             </Typography>
             
             <form onSubmit={handleSubmit}>
               <TextField
-                label="Phone Number"
-                type="tel"
+                label="Phone Number or Username"
                 fullWidth
                 margin="normal"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+254700000000"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                placeholder="0726953346 or username"
                 required
-                helperText="Include country code (e.g., +254)"
+                helperText="Enter your phone number or username"
               />
+
+              <FormControl component="fieldset" sx={{ mt: 2 }}>
+                <FormLabel component="legend">How would you like to receive your OTP?</FormLabel>
+                <RadioGroup
+                  row
+                  value={deliveryMethod}
+                  onChange={(e) => setDeliveryMethod(e.target.value as 'sms' | 'email')}
+                >
+                  <FormControlLabel value="sms" control={<Radio />} label="SMS" />
+                  <FormControlLabel value="email" control={<Radio />} label="Email" />
+                </RadioGroup>
+              </FormControl>
 
               {error && (
                 <Alert severity="error" sx={{ mt: 2 }}>
@@ -83,7 +104,7 @@ const LoginPage: React.FC = () => {
                 sx={{ mt: 3 }}
                 disabled={loading}
               >
-                {loading ? 'Sending OTP...' : 'Send OTP'}
+                {loading ? 'Sending OTP...' : `Send OTP via ${deliveryMethod.toUpperCase()}`}
               </Button>
             </form>
           </Box>

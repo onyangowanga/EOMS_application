@@ -42,7 +42,7 @@ services:
       - media_files:/app/media
       - static_files:/app/staticfiles
     ports:
-      - "8001:8000"  # Different port from COMS
+      - "127.0.0.1:8000:8000"  # Nginx serves public port 8001 and proxies to localhost:8000
     environment:
       - DEBUG=False
       - SECRET_KEY=${SECRET_KEY}

@@ -15,6 +15,7 @@ urlpatterns = [
     # API Endpoints
     path('api/auth/', include('apps.users.urls')),
     path('api/users/', include('apps.users.urls')),
+    path('api/events/', include('apps.events.urls')),
     path('api/committees/', include('apps.committees.urls')),
     path('api/tasks/', include('apps.tasks.urls')),
     path('api/finance/', include('apps.finance.urls')),

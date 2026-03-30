@@ -1,6 +1,7 @@
 // User & Authentication Types
 export interface User {
   id: number;
+  username?: string;
   full_name: string;
   phone: string;
   email?: string;
@@ -11,16 +12,19 @@ export interface User {
 }
 
 export interface LoginRequest {
-  phone: string;
+  identifier: string;  // Phone number or username
+  delivery_method: 'sms' | 'email';  // How to deliver OTP
 }
 
 export interface LoginResponse {
   message: string;
-  otp_code?: string; // Only in dev mode
+  sent: boolean;
+  method: string;
+  otp?: string; // Only in dev mode when sending fails
 }
 
 export interface VerifyOTPRequest {
-  phone: string;
+  identifier: string;  // Phone or email used for OTP
   otp_code: string;
 }
 
@@ -186,4 +190,187 @@ export interface CommitteeReport {
   total_expenses: string;
   balance: string;
   providers_count: number;
+}
+
+// Event Types (Phase 5+)
+export interface Event {
+  id: string;  // UUID
+  event_name: string;
+  event_type: 'FUNERAL' | 'WEDDING' | 'CORPORATE' | 'OTHER';
+  event_date: string;
+  location: string;
+  description?: string;
+  status: 'PLANNING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+  financial_progress?: string;  // Decimal percentage
+  operational_progress?: string;  // Decimal percentage
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EventCreate {
+  event_name: string;
+  event_type: 'FUNERAL' | 'WEDDING' | 'CORPORATE' | 'OTHER';
+  event_date: string;
+  location: string;
+  description?: string;
+}
+
+export interface EventMember {
+  id: string;
+  event: string;  // Event UUID
+  user: User;
+  role: 'OWNER' | 'CHAIR' | 'TREASURER' | 'SECRETARY' | 'MEMBER';
+  added_at: string;
+}
+
+// Enhanced Committee Types (Phase 5)
+export interface CommitteePhase6 {
+  id: string;  // UUID
+  event: string;  // Event UUID
+  event_name: string;  // Display field
+  committee_type: 'MAIN' | 'BUDGET' | 'FUNDS_MOBILIZATION' | 'LOGISTICS' | 'CATERING' | 'OTHER';
+  committee_type_display: string;
+  is_main: boolean;
+  lead: string;  // User ID
+  lead_name: string;  // Display field
+  description?: string;
+  
+  // Calculated fields
+  operational_progress?: string;  // Average task progress
+  member_count?: number;
+  task_count?: number;
+  tasks_completed?: number;
+  
+  created_at: string;
+  updated_at: string;
+}
+
+// Enhanced Task Types (Phase 5)
+export interface TaskPhase6 {
+  id: string;  // UUID
+  event: string;  // Event UUID
+  event_name: string;  // Display field
+  committee?: string;  // Committee UUID
+  title: string;
+  description: string;
+  assigned_to?: string;  // User ID
+  assigned_to_name?: string;
+  status: 'TODO' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+  status_display: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+  priority_display: string;
+  progress_percentage: string;  // Decimal 0.00 - 100.00
+  progress_status: string;  // Calculated: "Not Started", "In Progress", etc.
+  deadline?: string;
+  days_remaining?: number;  // Calculated
+  is_overdue?: boolean;
+  completed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Enhanced Finance Types (Phase 5)
+export interface CollectionPhase6 {
+  id: string;  // UUID
+  event: string;  // Event UUID
+  event_name: string;  // Display field
+  cluster?: string;  // Cluster UUID
+  cluster_name?: string;
+  source_type: 'CLUSTER' | 'GENERAL';
+  source_type_display: string;
+  amount: string;  // Decimal
+  description?: string;
+  received_at: string;
+  created_at: string;
+}
+
+export interface ExpensePhase6 {
+  id: string;  // UUID
+  event: string;  // Event UUID
+  event_name: string;  // Display field
+  budget_item?: string;  // Budget item UUID
+  budget_item_name?: string;
+  category: string;
+  description: string;
+  amount: string;  // Decimal
+  status: 'PENDING' | 'APPROVED_CHAIR' | 'APPROVED_TREASURER' | 'APPROVED_FINANCE' | 'REJECTED' | 'PAID';
+  status_display: string;
+  
+  // 3-tier approval
+  approved_by_chair?: string;
+  chair_name?: string;
+  approved_by_treasurer?: string;
+  treasurer_name?: string;
+  approved_by_finance?: string;
+  finance_name?: string;
+  approval_progress?: string;  // "X/3 approvals"
+  is_fully_approved?: boolean;
+  
+  rejection_reason?: string;
+  paid_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Event Progress Summary
+export interface EventProgress {
+  event_id: string;
+  event_name: string;
+  total_tasks: number;
+  completed_tasks: number;
+  in_progress_tasks: number;
+  not_started_tasks: number;
+  average_progress: string;
+  completion_rate: string;
+  on_track_tasks: number;
+  overdue_tasks: number;
+}
+
+// Financial Summary (Phase 6)
+export interface FinancialSummary {
+  event_id: string;
+  event_name: string;
+  collections: {
+    total: string;
+    cluster: string;
+    general: string;
+  };
+  expenses: {
+    total: string;
+    paid: string;
+    pending: string;
+    fully_approved: string;
+    awaiting_approval: string;
+  };
+  balance: string;
+  expenses_by_status: {
+    [key: string]: number;
+  };
+  budget_utilization: string;
+  financial_health: string;
+}
+
+// Cluster Types (Phase 2)
+export interface ClusterGroup {
+  id: string;  // UUID
+  event: string;  // Event UUID
+  name: string;
+  cluster_type: 'AGE_GROUP' | 'GENDER' | 'PROFESSION' | 'LOCATION' | 'OTHER';
+  target_amount?: string;
+  collected_amount?: string;
+  leader?: string;  // User ID
+  description?: string;
+  created_at: string;
+}
+
+export interface BudgetItem {
+  id: string;
+  event: string;
+  committee?: string;
+  item_name: string;
+  description?: string;
+  allocated_amount: string;
+  spent_amount: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED';
+  created_at: string;
 }

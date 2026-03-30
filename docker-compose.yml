@@ -49,6 +49,9 @@ services:
       - DB_PORT=5432
       - REDIS_URL=redis://redis:6379/0
       - ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0
+      - AFRICAS_TALKING_USERNAME=sandbox
+      - AFRICAS_TALKING_API_KEY=dummy_api_key_for_local_dev
+      - AFRICAS_TALKING_SENDER_ID=EOMS
     depends_on:
       db:
         condition: service_healthy

@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     
     # Local apps
     'apps.users',
+    'apps.events',
     'apps.committees',
     'apps.tasks',
     'apps.finance',
@@ -144,14 +145,16 @@ SIMPLE_JWT = {
 }
 
 # CORS Settings
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:5173",  # Vite React dev server
-    "http://localhost:8080",
-    "http://localhost:19006",  # Expo
-]
+# Temporarily allow all origins for debugging
+CORS_ALLOW_ALL_ORIGINS = True
+cors_origins = config('CORS_ALLOWED_ORIGINS', default='http://localhost:3000,http://localhost:5173')
+CORS_ALLOWED_ORIGINS = [origin.strip() for origin in cors_origins.split(',') if origin.strip()]
 
 CORS_ALLOW_CREDENTIALS = True
+
+# CSRF Settings
+csrf_trusted_origins = config('CSRF_TRUSTED_ORIGINS', default='http://156.232.88.156:8001,http://localhost:8000')
+CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in csrf_trusted_origins.split(',') if origin.strip()]
 
 # Celery Configuration
 CELERY_BROKER_URL = config('REDIS_URL', default='redis://localhost:6379/0')
@@ -160,6 +163,20 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'Africa/Nairobi'
+
+# Africa's Talking SMS Configuration
+AFRICAS_TALKING_USERNAME = config('AFRICAS_TALKING_USERNAME', default='sandbox')
+AFRICAS_TALKING_API_KEY = config('AFRICAS_TALKING_API_KEY', default='')
+AFRICAS_TALKING_SENDER_ID = config('AFRICAS_TALKING_SENDER_ID', default='EOMS')
+
+# Email Configuration
+EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.smtp.EmailBackend')
+EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
+EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@eoms.com')
 
 # DRF Spectacular Settings (API Documentation)
 SPECTACULAR_SETTINGS = {

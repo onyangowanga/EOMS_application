@@ -7,8 +7,8 @@ interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (phone: string) => Promise<void>;
-  verifyOTP: (phone: string, otpCode: string) => Promise<void>;
+  login: (identifier: string, deliveryMethod: 'sms' | 'email') => Promise<void>;
+  verifyOTP: (identifier: string, otpCode: string) => Promise<void>;
   logout: () => void;
   updateUser: (user: User) => void;
 }
@@ -39,12 +39,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsLoading(false);
   }, []);
 
-  const login = async (phone: string) => {
-    await authService.login({ phone });
+  const login = async (identifier: string, deliveryMethod: 'sms' | 'email') => {
+    await authService.login({ identifier, delivery_method: deliveryMethod });
   };
 
-  const verifyOTP = async (phone: string, otpCode: string) => {
-    const response = await authService.verifyOTP({ phone, otp_code: otpCode });
+  const verifyOTP = async (identifier: string, otpCode: string) => {
+    const response = await authService.verifyOTP({ identifier, otp_code: otpCode });
     setUser(response.user);
   };
 

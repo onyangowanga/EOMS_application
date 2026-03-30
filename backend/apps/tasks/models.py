@@ -1,10 +1,11 @@
 from django.db import models
 from django.conf import settings
+from decimal import Decimal
 from apps.committees.models import Committee
 
 
 class Task(models.Model):
-    """Task model for managing tasks"""
+    """Task model for managing tasks - now event-centric"""
     
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
@@ -19,6 +20,16 @@ class Task(models.Model):
         ('HIGH', 'High'),
         ('URGENT', 'Urgent'),
     ]
+    
+    # NEW: Event-centric architecture
+    event = models.ForeignKey(
+        'events.Event',
+        on_delete=models.CASCADE,
+        related_name='tasks',
+        null=True,
+        blank=True,
+        help_text="Main event this task belongs to"
+    )
     
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
@@ -42,6 +53,15 @@ class Task(models.Model):
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='MEDIUM')
+    
+    # NEW: Progress tracking
+    progress_percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text="Task completion percentage (0-100)"
+    )
+    
     deadline = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

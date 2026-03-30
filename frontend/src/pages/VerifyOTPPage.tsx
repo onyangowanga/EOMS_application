@@ -18,7 +18,8 @@ const VerifyOTPPage: React.FC = () => {
   const { verifyOTP } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const phone = location.state?.phone || '';
+  const identifier = location.state?.identifier || '';
+  const deliveryMethod = location.state?.deliveryMethod || 'sms';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,7 +27,7 @@ const VerifyOTPPage: React.FC = () => {
     setLoading(true);
 
     try {
-      await verifyOTP(phone, otpCode);
+      await verifyOTP(identifier, otpCode);
       // Navigate to dashboard after successful verification
       navigate('/dashboard');
     } catch (err: any) {
@@ -36,7 +37,7 @@ const VerifyOTPPage: React.FC = () => {
     }
   };
 
-  if (!phone) {
+  if (!identifier) {
     navigate('/login');
     return null;
   }
@@ -51,12 +52,19 @@ const VerifyOTPPage: React.FC = () => {
         py={4}
       >
         <Paper elevation={3} sx={{ p: 4 }}>
+          <Box display="flex" justifyContent="center" mb={2}>
+            <img 
+              src="/favicon_io/android-chrome-192x192.png" 
+              alt="EOMS Logo" 
+              style={{ width: '80px', height: '80px' }}
+            />
+          </Box>
           <Typography variant="h5" component="h1" gutterBottom align="center">
             Verify OTP
           </Typography>
           
           <Typography variant="body2" align="center" color="text.secondary" gutterBottom>
-            Enter the 6-digit code sent to {phone}
+            Enter the 6-digit code sent via {deliveryMethod.toUpperCase()}
           </Typography>
           
           <Box mt={4}>

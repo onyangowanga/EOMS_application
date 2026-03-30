@@ -1,13 +1,80 @@
 from django.db import models
 from django.conf import settings
+from decimal import Decimal
 
 
 class Committee(models.Model):
-    """Committee model for managing event committees"""
+    """Committee/Subcommittee model - now event-centric"""
+    
+    COMMITTEE_TYPE_CHOICES = [
+        ('MAIN', 'Main Committee'),
+        ('BUDGET_FINANCE', 'Budget & Finance Committee'),
+        ('FUNDS_MOBILIZATION', 'Funds Mobilization Committee'),
+        ('LOGISTICS', 'Logistics'),
+        ('CATERING', 'Catering'),
+        ('VENUE', 'Venue'),
+        ('TRANSPORT', 'Transport'),
+        ('MEDIA', 'Media & Communications'),
+        ('SECURITY', 'Security'),
+        ('OTHER', 'Other'),
+    ]
+    
+    # NEW: Event-centric architecture
+    event = models.ForeignKey(
+        'events.Event',
+        on_delete=models.CASCADE,
+        related_name='subcommittees',
+        null=True,
+        blank=True,
+        help_text="Main event this committee belongs to"
+    )
     
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True)
-    event_type = models.CharField(max_length=100, default='General')
+    
+    # NEW: Committee classification
+    is_main = models.BooleanField(
+        default=False,
+        help_text="Whether this is the main/umbrella committee"
+    )
+    committee_type = models.CharField(
+        max_length=30,
+        choices=COMMITTEE_TYPE_CHOICES,
+        default='OTHER',
+        help_text="Type/function of this committee"
+    )
+    
+    # NEW: Committee lead
+    lead = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='led_committees',
+        help_text="Lead/chairperson of this committee"
+    )
+    
+    # NEW: Activity planning
+    expected_activities = models.TextField(
+        blank=True,
+        help_text="Expected activities and responsibilities"
+    )
+    deadline = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Deadline for committee deliverables"
+    )
+    
+    # NEW: Budget allocation
+    budget_allocation = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text="Budget allocated to this committee"
+    )
+    
+    # DEPRECATED: Keeping for backward compatibility, will be removed in migration
+    event_type = models.CharField(max_length=100, default='General', blank=True)
     event_date = models.DateField(null=True, blank=True)
     status = models.CharField(
         max_length=20,
@@ -16,14 +83,17 @@ class Committee(models.Model):
             ('COMPLETED', 'Completed'),
             ('ARCHIVED', 'Archived'),
         ],
-        default='ACTIVE'
+        default='ACTIVE',
+        blank=True
     )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
+        blank=True,
         related_name='created_committees'
     )
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

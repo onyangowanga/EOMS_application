@@ -10,7 +10,7 @@ class UserSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ['id', 'full_name', 'phone', 'email', 'role', 'is_active', 
+        fields = ['id', 'username', 'full_name', 'phone', 'email', 'role', 'is_active', 
                   'is_verified', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
@@ -22,10 +22,18 @@ class UserCreateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ['full_name', 'phone', 'email', 'role', 'password']
+        fields = ['id', 'username', 'full_name', 'phone', 'email', 'role', 'password']
+        read_only_fields = ['id']
+        extra_kwargs = {
+            'username': {'required': False, 'allow_null': True},
+            'email': {'required': False, 'allow_null': True, 'allow_blank': True},
+        }
     
     def create(self, validated_data):
         password = validated_data.pop('password', None)
+        # Remove empty email if provided as empty string
+        if 'email' in validated_data and not validated_data['email']:
+            validated_data.pop('email')
         user = User.objects.create(**validated_data)
         if password:
             user.set_password(password)
@@ -34,15 +42,19 @@ class UserCreateSerializer(serializers.ModelSerializer):
 
 
 class LoginSerializer(serializers.Serializer):
-    """Serializer for login (OTP request)"""
+    """Serializer for login (OTP request) - accepts phone or username and delivery method"""
     
-    phone = serializers.CharField(max_length=15)
+    identifier = serializers.CharField(max_length=255, help_text="Phone number or username")
+    delivery_method = serializers.ChoiceField(
+        choices=['sms', 'email'],
+        help_text="Choose OTP delivery method: 'sms' or 'email'"
+    )
 
 
 class VerifyOTPSerializer(serializers.Serializer):
-    """Serializer for OTP verification"""
+    """Serializer for OTP verification - accepts identifier (phone/email) and OTP code"""
     
-    phone = serializers.CharField(max_length=15)
+    identifier = serializers.CharField(max_length=255, help_text="Phone number or email used for OTP")
     otp_code = serializers.CharField(max_length=6)
 
 

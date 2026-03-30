@@ -41,6 +41,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         ('STAKEHOLDER', 'Stakeholder'),
     ]
     
+    username = models.CharField(max_length=150, unique=True, blank=True, null=True)
     full_name = models.CharField(max_length=255)
     phone = models.CharField(max_length=15, unique=True)
     email = models.EmailField(blank=True, null=True)
@@ -67,9 +68,10 @@ class User(AbstractBaseUser, PermissionsMixin):
 
 
 class OTP(models.Model):
-    """OTP model for phone verification"""
+    """OTP model for phone/email verification"""
     
-    phone = models.CharField(max_length=15)
+    phone = models.CharField(max_length=15, blank=True, null=True)
+    email = models.EmailField(blank=True, null=True)
     otp_code = models.CharField(max_length=6)
     is_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -80,7 +82,8 @@ class OTP(models.Model):
         ordering = ['-created_at']
     
     def __str__(self):
-        return f"OTP for {self.phone}"
+        identifier = self.email or self.phone
+        return f"OTP for {identifier}"
     
     def is_valid(self):
         """Check if OTP is still valid"""
