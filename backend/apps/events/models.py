@@ -105,6 +105,8 @@ class EventMember(models.Model):
         ('SECRETARY', 'Secretary'),
         ('TREASURER', 'Treasurer'),
         ('EVENT_OWNER', 'Event Owner'),  # Bereaved, Bride, Groom, etc.
+        ('TEAM_LEAD', 'Team Lead'),  # Subcommittee lead
+        ('CLUSTER_LEAD', 'Cluster Lead'),  # Cluster group lead
         ('MEMBER', 'Committee Member'),
     ]
     
@@ -147,6 +149,11 @@ class EventMember(models.Model):
         return self.role in ['CHAIRMAN', 'SECRETARY', 'TREASURER', 'EVENT_OWNER']
     
     @property
+    def is_executive(self):
+        """Check if member is an executive committee member"""
+        return self.role in ['CHAIRMAN', 'SECRETARY', 'TREASURER', 'EVENT_OWNER']
+    
+    @property
     def has_super_admin_rights(self):
         """Event owners have super admin rights"""
         return self.role == 'EVENT_OWNER'
@@ -155,6 +162,17 @@ class EventMember(models.Model):
     def can_approve_expenses(self):
         """Can this member approve expenses?"""
         return self.role in ['CHAIRMAN', 'TREASURER']
+    
+    @property
+    def can_manage_roles(self):
+        """Can this member manage other members' roles and assignments?"""
+        # Only admins (via user.role) and executive members can manage roles
+        return self.is_executive or self.user.role == 'ADMIN'
+    
+    @property
+    def can_create_tasks(self):
+        """Can this member create tasks?"""
+        return self.role in ['CHAIRMAN', 'SECRETARY', 'EVENT_OWNER', 'TEAM_LEAD'] or self.user.role == 'ADMIN'
 
 
 class ClusterGroup(models.Model):
@@ -245,7 +263,16 @@ class ClusterGroup(models.Model):
     @property
     def pending_in_lead_account(self):
         """Funds with leader not yet submitted to treasurer"""
-        return self.funds_in_lead_account - self.submitted_to_treasurer
+        total_collected = self.contributions.filter(
+            is_pledge=False
+        ).aggregate(total=models.Sum('amount'))['total'] or Decimal('0.00')
+
+        total_submitted_any = self.deposits.aggregate(
+            total=models.Sum('amount')
+        )['total'] or Decimal('0.00')
+
+        pending = total_collected - total_submitted_any
+        return pending if pending > 0 else Decimal('0.00')
     
     def update_collected_amount(self):
         """Recalculate collected amount from contributions"""
@@ -475,6 +502,14 @@ class BudgetItem(models.Model):
         null=True,
         blank=True,
         help_text="Optional: Committee responsible for this budget item"
+    )
+    linked_task = models.ForeignKey(
+        'tasks.Task',
+        on_delete=models.SET_NULL,
+        related_name='budget_items',
+        null=True,
+        blank=True,
+        help_text="Task this budget line was generated from"
     )
     item_name = models.CharField(
         max_length=255,

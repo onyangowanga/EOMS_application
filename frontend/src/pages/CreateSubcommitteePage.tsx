@@ -6,6 +6,10 @@ import {
   TextField,
   Button,
   Alert,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -30,6 +34,7 @@ const CreateSubcommitteePage: React.FC = () => {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
+    committee_type: 'OTHER',
   });
   const [validationError, setValidationError] = useState('');
 
@@ -50,12 +55,14 @@ const CreateSubcommitteePage: React.FC = () => {
         event: String(Number(resolvedEventId)),
         name: data.name,
         description: data.description,
-        committee_type: 'OTHER',
+        committee_type: data.committee_type,
         is_main: false,
       });
     },
     onSuccess: () => {
+      // Invalidate both queries to ensure fresh data
       queryClient.invalidateQueries({ queryKey: ['committees', resolvedEventId] });
+      queryClient.invalidateQueries({ queryKey: ['committees-with-members', resolvedEventId] });
       navigate(`/events/${resolvedEventId}/subcommittees`);
     },
   });
@@ -102,8 +109,25 @@ const CreateSubcommitteePage: React.FC = () => {
             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
             multiline
             rows={4}
-            sx={{ mb: 3 }}
+            sx={{ mb: 2 }}
           />
+
+          <FormControl fullWidth sx={{ mb: 3 }}>
+            <InputLabel>Committee Type</InputLabel>
+            <Select
+              value={formData.committee_type}
+              label="Committee Type"
+              onChange={(e) => setFormData({ ...formData, committee_type: e.target.value })}
+            >
+              <MenuItem value="LOGISTICS">Logistics</MenuItem>
+              <MenuItem value="CATERING">Catering</MenuItem>
+              <MenuItem value="VENUE">Venue</MenuItem>
+              <MenuItem value="TRANSPORT">Transport</MenuItem>
+              <MenuItem value="MEDIA">Media & Communications</MenuItem>
+              <MenuItem value="SECURITY">Security</MenuItem>
+              <MenuItem value="OTHER">Other</MenuItem>
+            </Select>
+          </FormControl>
 
           {createMutation.isError && (
             <Alert severity="error" sx={{ mb: 2 }}>

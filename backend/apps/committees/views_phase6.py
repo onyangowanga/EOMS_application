@@ -11,6 +11,8 @@ from .serializers import (
     CommitteeSerializer, CommitteeCreateSerializer, CommitteeListSerializer,
     CommitteeMemberSerializer, AddMemberSerializer, CommitteeBudgetSerializer
 )
+from apps.events.models import BudgetItem
+from apps.events.serializers import BudgetItemSerializer, BudgetItemCreateSerializer
 
 User = get_user_model()
 
@@ -193,6 +195,36 @@ class CommitteeViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         
         return Response(serializer.data)
+    
+    @action(detail=True, methods=['get', 'post'])
+    def budget_items(self, request, pk=None):
+        """Get or create budget items for the committee"""
+        committee = self.get_object()
+        
+        if request.method == 'GET':
+            # Get all budget items for this committee
+            items = BudgetItem.objects.filter(committee=committee).select_related(
+                'created_by', 'approved_by'
+            ).order_by('-created_at')
+            serializer = BudgetItemSerializer(items, many=True)
+            return Response(serializer.data)
+        
+        elif request.method == 'POST':
+            # Create a new budget item
+            data = request.data.copy()
+            data['committee'] = committee.id
+            data['event'] = committee.event.id
+            data['created_by'] = request.user.id
+            
+            serializer = BudgetItemCreateSerializer(data=data)
+            if serializer.is_valid():
+                budget_item = serializer.save()
+                # Return full serializer with computed fields
+                return Response(
+                    BudgetItemSerializer(budget_item).data,
+                    status=status.HTTP_201_CREATED
+                )
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     @action(detail=False, methods=['get'])
     def by_event(self, request):

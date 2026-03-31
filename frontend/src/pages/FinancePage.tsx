@@ -34,14 +34,17 @@ import {
   TrendingDown as TrendingDownIcon,
   AccountBalance as AccountBalanceIcon,
 } from '@mui/icons-material';
+import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { financeService } from '../services/finance.service';
 import { committeeService } from '../services/committee.service';
-import type { Collection, Expense, CollectionCreate, ExpenseCreate } from '../types/index';
+import { eventService } from '../services/event.service';
+import type { CollectionCreate, ExpenseCreate } from '../types/index';
 import { useAuth } from '../contexts/AuthContext';
 
 const FinancePage: React.FC = () => {
-  const { user } = useAuth();
+  const { eventId } = useParams<{ eventId?: string }>();
+  const { user, hasRole } = useAuth();
   const queryClient = useQueryClient();
   const [currentTab, setCurrentTab] = useState(0);
   const [openCollectionDialog, setOpenCollectionDialog] = useState(false);
@@ -66,23 +69,14 @@ const FinancePage: React.FC = () => {
   });
 
   // Fetch data
-  const { data: collections, isLoading: collectionsLoading } = useQuery({
-    queryKey: ['collections'],
-    queryFn: () => financeService.getCollections(),
+  const { data: collections, isLoading: collectionsLoading } = useQuery<any[]>({
+    queryKey: ['collections', eventId],
+    queryFn: () => (eventId ? eventService.getEventCollections(eventId) : financeService.getCollections()),
   });
 
-  const { data: expenses, isLoading: expensesLoading } = useQuery({
-    queryKey: ['expenses'],
-    queryFn: () => financeService.getExpenses(),
-  });
-
-  const { data: summary, isLoading: summaryLoading } = useQuery<{
-    total_collections: number;
-    total_expenses: number;
-    balance: number;
-  }>({
-    queryKey: ['finance-summary'],
-    queryFn: () => ({ total_collections: 0, total_expenses: 0, balance: 0 }),
+  const { data: expenses, isLoading: expensesLoading } = useQuery<any[]>({
+    queryKey: ['expenses', eventId],
+    queryFn: () => (eventId ? eventService.getEventExpenses(eventId) : financeService.getExpenses()),
   });
 
   const { data: committees } = useQuery({
@@ -90,11 +84,32 @@ const FinancePage: React.FC = () => {
     queryFn: committeeService.getAll,
   });
 
+  const normalizedCollections = Array.isArray(collections)
+    ? collections
+    : ((collections as any)?.results || []);
+
+  const normalizedExpenses = Array.isArray(expenses)
+    ? expenses
+    : ((expenses as any)?.results || []);
+
+  const summary = {
+    total_collections: normalizedCollections.reduce(
+      (sum: number, item: any) => sum + parseFloat(item.amount || '0'),
+      0
+    ),
+    total_expenses: normalizedExpenses.reduce(
+      (sum: number, item: any) => sum + parseFloat(item.amount || '0'),
+      0
+    ),
+    balance: 0,
+  };
+  summary.balance = summary.total_collections - summary.total_expenses;
+
   // Mutations
   const createCollectionMutation = useMutation({
     mutationFn: financeService.createCollection,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['collections'] });
+      queryClient.invalidateQueries({ queryKey: ['collections', eventId] });
       queryClient.invalidateQueries({ queryKey: ['finance-summary'] });
       setOpenCollectionDialog(false);
       resetCollectionForm();
@@ -107,7 +122,7 @@ const FinancePage: React.FC = () => {
   const createExpenseMutation = useMutation({
     mutationFn: financeService.createExpense,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['expenses', eventId] });
       queryClient.invalidateQueries({ queryKey: ['finance-summary'] });
       setOpenExpenseDialog(false);
       resetExpenseForm();
@@ -120,7 +135,7 @@ const FinancePage: React.FC = () => {
   const approveExpenseMutation = useMutation({
     mutationFn: (id: number) => financeService.approveExpense(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['expenses', eventId] });
     },
   });
 
@@ -185,7 +200,7 @@ const FinancePage: React.FC = () => {
     }).format(numAmount);
   };
 
-  if (summaryLoading) {
+  if (collectionsLoading || expensesLoading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
         <CircularProgress />
@@ -210,7 +225,7 @@ const FinancePage: React.FC = () => {
                     Total Collections
                   </Typography>
                   <Typography variant="h5" sx={{ mt: 1 }}>
-                    {formatCurrency(summary?.total_collections || 0)}
+                    {formatCurrency(summary.total_collections || 0)}
                   </Typography>
                 </Box>
                 <TrendingUpIcon sx={{ fontSize: 40, color: 'success.main' }} />
@@ -227,7 +242,7 @@ const FinancePage: React.FC = () => {
                     Total Expenses
                   </Typography>
                   <Typography variant="h5" sx={{ mt: 1 }}>
-                    {formatCurrency(summary?.total_expenses || 0)}
+                    {formatCurrency(summary.total_expenses || 0)}
                   </Typography>
                 </Box>
                 <TrendingDownIcon sx={{ fontSize: 40, color: 'error.main' }} />
@@ -247,10 +262,10 @@ const FinancePage: React.FC = () => {
                     variant="h5"
                     sx={{
                       mt: 1,
-                      color: (summary?.balance || 0) >= 0 ? 'success.main' : 'error.main',
+                      color: (summary.balance || 0) >= 0 ? 'success.main' : 'error.main',
                     }}
                   >
-                    {formatCurrency(summary?.balance || 0)}
+                    {formatCurrency(summary.balance || 0)}
                   </Typography>
                 </Box>
                 <AccountBalanceIcon sx={{ fontSize: 40, color: 'primary.main' }} />
@@ -301,21 +316,21 @@ const FinancePage: React.FC = () => {
                       <CircularProgress size={24} />
                     </TableCell>
                   </TableRow>
-                ) : collections && collections.length > 0 ? (
-                  collections.map((collection: Collection) => (
+                ) : normalizedCollections.length > 0 ? (
+                  normalizedCollections.map((collection: any) => (
                     <TableRow key={collection.id} hover>
-                      <TableCell>{collection.payer_name}</TableCell>
-                      <TableCell>{collection.payer_phone}</TableCell>
+                      <TableCell>{collection.payer_name || collection.source_type_display || 'N/A'}</TableCell>
+                      <TableCell>{collection.payer_phone || collection.payer_phone_number || '-'}</TableCell>
                       <TableCell>{formatCurrency(collection.amount)}</TableCell>
                       <TableCell>
-                        <Chip label={collection.channel} size="small" />
+                        <Chip label={collection.channel || collection.source_type_display || 'N/A'} size="small" />
                       </TableCell>
-                      <TableCell>{collection.reference_number}</TableCell>
-                      <TableCell>{collection.committee.name}</TableCell>
+                      <TableCell>{collection.reference_number || collection.reference || '-'}</TableCell>
+                      <TableCell>{collection.committee?.name || collection.committee_name || '-'}</TableCell>
                       <TableCell>
                         {new Date(collection.created_at).toLocaleDateString()}
                       </TableCell>
-                      <TableCell>{collection.recorded_by.full_name}</TableCell>
+                      <TableCell>{collection.recorded_by?.full_name || collection.recorded_by_name || '-'}</TableCell>
                     </TableRow>
                   ))
                 ) : (
@@ -364,15 +379,15 @@ const FinancePage: React.FC = () => {
                       <CircularProgress size={24} />
                     </TableCell>
                   </TableRow>
-                ) : expenses && expenses.length > 0 ? (
-                  expenses.map((expense: Expense) => (
+                ) : normalizedExpenses.length > 0 ? (
+                  normalizedExpenses.map((expense: any) => (
                     <TableRow key={expense.id} hover>
-                      <TableCell>{expense.vendor}</TableCell>
+                      <TableCell>{expense.vendor || expense.budget_item_name || 'N/A'}</TableCell>
                       <TableCell>{formatCurrency(expense.amount)}</TableCell>
                       <TableCell>
-                        <Chip label={expense.category} size="small" color="primary" />
+                        <Chip label={expense.category || 'GENERAL'} size="small" color="primary" />
                       </TableCell>
-                      <TableCell>{expense.committee.name}</TableCell>
+                      <TableCell>{expense.committee?.name || expense.committee_name || '-'}</TableCell>
                       <TableCell>
                         <Chip
                           label={expense.status}
@@ -381,11 +396,11 @@ const FinancePage: React.FC = () => {
                         />
                       </TableCell>
                       <TableCell>
-                        {new Date(expense.created_at).toLocaleDateString()}
+                        {new Date(expense.created_at || expense.updated_at).toLocaleDateString()}
                       </TableCell>
-                      <TableCell>{expense.requested_by.full_name}</TableCell>
+                      <TableCell>{expense.requested_by?.full_name || expense.requested_by_name || '-'}</TableCell>
                       <TableCell>
-                        {user?.role === 'FINANCE' && expense.status === 'PENDING' && (
+                        {hasRole(['finance_member', 'executive_admin']) && expense.status === 'PENDING' && (
                           <Box display="flex" gap={1}>
                             <Button
                               size="small"

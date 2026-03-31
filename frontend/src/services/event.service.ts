@@ -10,6 +10,8 @@ import type {
   CollectionPhase6,
   ExpensePhase6,
   ClusterGroup,
+  ClusterContribution,
+  ClusterDeposit,
   BudgetItem
 } from '../types';
 
@@ -90,7 +92,7 @@ class EventService {
   async addEventMember(
     eventId: string,
     userId: number,
-    role: 'EVENT_OWNER' | 'CHAIRMAN' | 'TREASURER' | 'SECRETARY' | 'MEMBER'
+    role: 'EVENT_OWNER' | 'CHAIRMAN' | 'TREASURER' | 'SECRETARY' | 'TEAM_LEAD' | 'CLUSTER_LEAD' | 'MEMBER'
   ): Promise<EventMember> {
     const response = await apiClient.post<EventMember>(
       `${this.baseUrl}/${eventId}/add_member/`,
@@ -111,9 +113,20 @@ class EventService {
   /**
    * Get all committees for an event
    */
-  async getEventCommittees(eventId: string): Promise<CommitteePhase6[]> {
+  async getEventCommittees(
+    eventId: string,
+    filters?: { committeeType?: string; isMain?: boolean }
+  ): Promise<CommitteePhase6[]> {
+    const searchParams = new URLSearchParams({ event_id: eventId });
+    if (filters?.committeeType) {
+      searchParams.set('committee_type', filters.committeeType);
+    }
+    if (typeof filters?.isMain === 'boolean') {
+      searchParams.set('is_main', String(filters.isMain));
+    }
+
     const response = await apiClient.get<CommitteePhase6[]>(
-      `/committees/by_event/?event_id=${eventId}`
+      `/committees/by_event/?${searchParams.toString()}`
     );
     return response.data;
   }
@@ -242,6 +255,33 @@ class EventService {
     const response = await apiClient.get<CollectionPhase6[]>(
       `/finance/collections/by_event/?event_id=${eventId}`
     );
+    return (response.data as any)?.results || response.data || [];
+  }
+
+  /**
+   * Record a general (non-cluster) collection for an event
+   */
+  async createGeneralCollection(data: {
+    event: string;
+    committee_id: number;
+    payer_name: string;
+    payer_phone?: string;
+    amount: number;
+    channel: 'CASH' | 'MPESA' | 'BANK' | 'OTHER';
+    reference_number?: string;
+    description?: string;
+  }) {
+    const response = await apiClient.post('/finance/collections/', {
+      event: data.event,
+      committee_id: data.committee_id,
+      source_type: 'GENERAL',
+      payer_name: data.payer_name,
+      payer_phone: data.payer_phone || '',
+      amount: data.amount,
+      channel: data.channel,
+      reference_number: data.reference_number || '',
+      description: data.description || '',
+    });
     return response.data;
   }
 
@@ -262,7 +302,7 @@ class EventService {
     const response = await apiClient.get<ExpensePhase6[]>(
       `/finance/expenses/?event=${eventId}`
     );
-    return response.data;
+    return (response.data as any)?.results || response.data || [];
   }
 
   /**
@@ -329,6 +369,14 @@ class EventService {
    */
   async getEventClusters(eventId: string): Promise<ClusterGroup[]> {
     const response = await apiClient.get<ClusterGroup[]>(`${this.baseUrl}/clusters/?event=${eventId}`);
+    return (response.data as any)?.results || response.data || [];
+  }
+
+  /**
+   * Get a single cluster with summary fields
+   */
+  async getCluster(clusterId: string): Promise<ClusterGroup> {
+    const response = await apiClient.get<ClusterGroup>(`${this.baseUrl}/clusters/${clusterId}/`);
     return response.data;
   }
 
@@ -338,12 +386,76 @@ class EventService {
   async createCluster(data: {
     event: string;
     name: string;
-    cluster_type: 'AGE_GROUP' | 'GENDER' | 'PROFESSION' | 'LOCATION' | 'OTHER';
-    target_amount?: number;
-    leader?: number;
-    description?: string;
+    target_amount: string;
+    cluster_lead?: number;
+    funds_in_lead_account?: string;
   }): Promise<ClusterGroup> {
     const response = await apiClient.post<ClusterGroup>(`${this.baseUrl}/clusters/`, data);
+    return response.data;
+  }
+
+  /**
+   * Get all cluster deposits for an event (pending + confirmed)
+   */
+  async getClusterDeposits(eventId: string): Promise<any[]> {
+    const response = await apiClient.get(`${this.baseUrl}/cluster-deposits/?event=${eventId}`);
+    return (response.data as any)?.results || response.data || [];
+  }
+
+  /**
+   * Get contributions for a cluster
+   */
+  async getClusterContributions(clusterId: string): Promise<ClusterContribution[]> {
+    const response = await apiClient.get<ClusterContribution[]>(`${this.baseUrl}/cluster-contributions/?cluster=${clusterId}`);
+    return (response.data as any)?.results || response.data || [];
+  }
+
+  /**
+   * Record a cluster contribution or pledge
+   */
+  async createClusterContribution(data: {
+    cluster: string;
+    contributor_name: string;
+    contributor_phone?: string;
+    amount: number;
+    is_pledge?: boolean;
+    payment_channel?: string;
+    reference_number?: string;
+    notes?: string;
+  }): Promise<ClusterContribution> {
+    const response = await apiClient.post<ClusterContribution>(`${this.baseUrl}/cluster-contributions/`, data);
+    return response.data;
+  }
+
+  /**
+   * Get deposits for a single cluster
+   */
+  async getClusterDepositsByCluster(clusterId: string): Promise<ClusterDeposit[]> {
+    const response = await apiClient.get<ClusterDeposit[]>(`${this.baseUrl}/cluster-deposits/?cluster=${clusterId}`);
+    return (response.data as any)?.results || response.data || [];
+  }
+
+  /**
+   * Submit collected funds to treasurer
+   */
+  async createClusterDeposit(data: {
+    cluster: string;
+    amount: number;
+    deposit_channel: string;
+    reference_number?: string;
+    notes?: string;
+  }): Promise<ClusterDeposit> {
+    const response = await apiClient.post<ClusterDeposit>(`${this.baseUrl}/cluster-deposits/`, data);
+    return response.data;
+  }
+
+  /**
+   * Treasurer confirms receipt of a cluster deposit
+   */
+  async confirmClusterDeposit(depositId: string): Promise<any> {
+    const response = await apiClient.post(
+      `${this.baseUrl}/cluster-deposits/${depositId}/confirm_by_treasurer/`
+    );
     return response.data;
   }
 
@@ -352,8 +464,28 @@ class EventService {
   /**
    * Get all budget items for an event
    */
-  async getEventBudgetItems(eventId: string): Promise<BudgetItem[]> {
-    const response = await apiClient.get<BudgetItem[]>(`${this.baseUrl}/budget-items/?event=${eventId}`);
+  async getEventBudgetItems(eventId: string, status?: string): Promise<BudgetItem[]> {
+    const searchParams = new URLSearchParams({ event: eventId });
+    if (status) {
+      searchParams.set('status', status);
+    }
+    const response = await apiClient.get<BudgetItem[]>(`${this.baseUrl}/budget-items/?${searchParams.toString()}`);
+    return (response.data as any)?.results || response.data || [];
+  }
+
+  /**
+   * Approve a budget item
+   */
+  async approveBudgetItem(budgetItemId: string) {
+    const response = await apiClient.post(`${this.baseUrl}/budget-items/${budgetItemId}/approve/`);
+    return response.data;
+  }
+
+  /**
+   * Reject a budget item
+   */
+  async rejectBudgetItem(budgetItemId: string) {
+    const response = await apiClient.post(`${this.baseUrl}/budget-items/${budgetItemId}/reject/`);
     return response.data;
   }
 

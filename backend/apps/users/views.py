@@ -16,6 +16,8 @@ from .serializers import (
 )
 from .sms import send_otp_sms
 from .email_service import send_otp_email
+from .rbac import resolve_user_roles
+from apps.events.models import EventMember
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -27,6 +29,13 @@ class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """Only executive admins can list/manage all users."""
+        user_roles = resolve_user_roles(self.request.user)
+        if 'executive_admin' in user_roles:
+            return User.objects.all()
+        return User.objects.filter(id=self.request.user.id)
     
     def get_serializer_class(self):
         if self.action == 'create':
@@ -35,6 +44,15 @@ class UserViewSet(viewsets.ModelViewSet):
     
     def create(self, request, *args, **kwargs):
         """Override create to add detailed error logging"""
+        can_create_user = 'executive_admin' in resolve_user_roles(request.user) or EventMember.objects.filter(
+            user=request.user,
+            is_active=True,
+            role__in=['EVENT_OWNER', 'CHAIRMAN', 'SECRETARY'],
+        ).exists()
+
+        if not can_create_user:
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
         logger.info(f"Creating user with data: {request.data}")
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
@@ -48,6 +66,11 @@ class UserViewSet(viewsets.ModelViewSet):
         except Exception as e:
             logger.error(f"User creation exception: {str(e)}")
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    def destroy(self, request, *args, **kwargs):
+        if 'executive_admin' not in resolve_user_roles(request.user):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        return super().destroy(request, *args, **kwargs)
     
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def login(self, request):

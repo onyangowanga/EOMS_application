@@ -11,6 +11,8 @@ from .serializers import (
     TaskSerializer, TaskCreateSerializer, TaskUpdateSerializer, TaskListSerializer,
     TaskCommentSerializer, TaskProgressUpdateSerializer
 )
+from apps.events.models import BudgetItem
+from apps.committees.models import CommitteeMember
 
 
 class TaskViewSet(viewsets.ModelViewSet):
@@ -63,14 +65,71 @@ class TaskViewSet(viewsets.ModelViewSet):
         elif self.action in ['update', 'partial_update']:
             return TaskUpdateSerializer
         return TaskSerializer
+
+    def _is_team_lead_for_committee(self, user, committee_id):
+        if not committee_id:
+            return False
+        return CommitteeMember.objects.filter(
+            committee_id=committee_id,
+            user=user,
+            role='TEAM_LEAD',
+        ).exists()
+
+    def create(self, request, *args, **kwargs):
+        committee_id = request.data.get('committee_id')
+
+        if not committee_id:
+            return Response({'error': 'committee_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not self._is_team_lead_for_committee(request.user, committee_id):
+            return Response({
+                'error': 'Only the assigned team lead can add activities for this committee'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        task = self.get_object()
+        if not self._is_team_lead_for_committee(request.user, task.committee_id):
+            return Response({'error': 'Read-only access: only team lead can modify activities'}, status=status.HTTP_403_FORBIDDEN)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        task = self.get_object()
+        if not self._is_team_lead_for_committee(request.user, task.committee_id):
+            return Response({'error': 'Read-only access: only team lead can modify activities'}, status=status.HTTP_403_FORBIDDEN)
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        task = self.get_object()
+        if not self._is_team_lead_for_committee(request.user, task.committee_id):
+            return Response({'error': 'Read-only access: only team lead can delete activities'}, status=status.HTTP_403_FORBIDDEN)
+        return super().destroy(request, *args, **kwargs)
     
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        task = serializer.save(created_by=self.request.user)
+
+        if task.estimated_cost and task.estimated_cost > Decimal('0.00'):
+            task_event = task.event or task.committee.event
+            if task_event:
+                BudgetItem.objects.create(
+                    event=task_event,
+                    committee=task.committee,
+                    linked_task=task,
+                    item_name=task.title,
+                    description=task.description or f"Auto-created from task #{task.id}",
+                    category='OTHER',
+                    allocated_amount=task.estimated_cost,
+                    status='PENDING',
+                    created_by=None,
+                )
     
     @action(detail=True, methods=['patch'])
     def update_status(self, request, pk=None):
         """Update task status"""
         task = self.get_object()
+        if not self._is_team_lead_for_committee(request.user, task.committee_id):
+            return Response({'error': 'Read-only access: only team lead can update task status'}, status=status.HTTP_403_FORBIDDEN)
         new_status = request.data.get('status')
         
         if new_status not in dict(Task.STATUS_CHOICES):
@@ -92,6 +151,8 @@ class TaskViewSet(viewsets.ModelViewSet):
     def update_progress(self, request, pk=None):
         """Update task progress percentage"""
         task = self.get_object()
+        if not self._is_team_lead_for_committee(request.user, task.committee_id):
+            return Response({'error': 'Read-only access: only team lead can update task progress'}, status=status.HTTP_403_FORBIDDEN)
         serializer = TaskProgressUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
@@ -113,6 +174,8 @@ class TaskViewSet(viewsets.ModelViewSet):
     def add_comment(self, request, pk=None):
         """Add a comment to the task"""
         task = self.get_object()
+        if not self._is_team_lead_for_committee(request.user, task.committee_id):
+            return Response({'error': 'Read-only access: only team lead can comment on activities'}, status=status.HTTP_403_FORBIDDEN)
         comment_text = request.data.get('comment')
         
         if not comment_text:

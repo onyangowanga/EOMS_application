@@ -13,9 +13,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Paper,
   Button,
-  IconButton,
   Chip,
   Stack,
   Alert,
@@ -29,19 +27,22 @@ import {
   TextField,
   LinearProgress,
   Divider,
+  Tooltip,
 } from '@mui/material';
 import {
   Add as AddIcon,
-  Edit as EditIcon,
   CheckCircle as ApproveIcon,
-  Cancel as RejectIcon,
   AttachMoney as MoneyIcon,
   TrendingUp as TrendingUpIcon,
   Assessment as AssessmentIcon,
   PendingActions as PendingIcon,
+  RequestPage as RequestFundsIcon,
+  Cancel as RejectIcon,
 } from '@mui/icons-material';
 import { eventService } from '../services/event.service';
-import type { ExpensePhase6 } from '../types';
+import { financeService } from '../services/finance.service';
+import { useAuth } from '../contexts/AuthContext';
+import type { ExpensePhase6, BudgetItem } from '../types';
 
 /**
  * BudgetManagementPage - Comprehensive budget tracking and approval workflow
@@ -65,6 +66,7 @@ interface BudgetFormData {
 
 const BudgetManagementPage: React.FC = () => {
   const { eventId } = useParams<{ eventId: string }>();
+  const { user, hasRole } = useAuth();
   const queryClient = useQueryClient();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -81,6 +83,13 @@ const BudgetManagementPage: React.FC = () => {
   const [formError, setFormError] = useState('');
   const [selectedExpense, setSelectedExpense] = useState<ExpensePhase6 | null>(null);
   const [approvalDialog, setApprovalDialog] = useState(false);
+  const [selectedBudgetItem, setSelectedBudgetItem] = useState<BudgetItem | null>(null);
+  const [openRequisitionDialog, setOpenRequisitionDialog] = useState(false);
+  const [newRequisition, setNewRequisition] = useState({
+    requested_amount: '',
+    purpose: '',
+    date_needed: '',
+  });
 
   // Fetch data
   const { data: budgetItems, isLoading: loadingBudget } = useQuery({
@@ -101,6 +110,29 @@ const BudgetManagementPage: React.FC = () => {
     enabled: !!eventId,
   });
 
+  const { data: eventMembers } = useQuery({
+    queryKey: ['event-members', eventId],
+    queryFn: () => eventService.getEventMembers(eventId!),
+    enabled: !!eventId,
+  });
+
+  const normalizedExpenses: ExpensePhase6[] = Array.isArray(expenses)
+    ? expenses
+    : ((expenses as any)?.results || []);
+
+  const normalizedBudgetItems: BudgetItem[] = Array.isArray(budgetItems)
+    ? budgetItems
+    : ((budgetItems as any)?.results || []);
+
+  const currentEventRole = eventMembers?.find((member: any) => member.user_details?.id === user?.id)?.role;
+  const canAllocateBudget = hasRole(['executive_admin', 'finance_member', 'chair', 'treasurer']);
+
+  const canApproveAsChair = hasRole(['executive_admin', 'chair']);
+  const canApproveAsTreasurer = hasRole(['executive_admin', 'treasurer']);
+  const canApproveAsFinance = hasRole(['executive_admin', 'finance_member']);
+  const canReviewBudgetItems = canApproveAsChair || canApproveAsTreasurer || canApproveAsFinance;
+  const canRequestRequisition = hasRole(['executive_admin', 'subcommittee_lead', 'chair', 'secretary']);
+
   // Create budget item mutation
   const createBudgetMutation = useMutation({
     mutationFn: (data: any) => eventService.createBudgetItem(data),
@@ -113,8 +145,89 @@ const BudgetManagementPage: React.FC = () => {
     },
   });
 
+  const approveChairMutation = useMutation({
+    mutationFn: (expenseId: string) => eventService.approveAsChair(expenseId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['expenses', eventId] });
+      handleCloseApprovalDialog();
+    },
+  });
+
+  const approveTreasurerMutation = useMutation({
+    mutationFn: (expenseId: string) => eventService.approveAsTreasurer(expenseId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['expenses', eventId] });
+      handleCloseApprovalDialog();
+    },
+  });
+
+  const approveFinanceMutation = useMutation({
+    mutationFn: (expenseId: string) => eventService.approveAsFinance(expenseId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['expenses', eventId] });
+      handleCloseApprovalDialog();
+    },
+  });
+
+  const markPaidMutation = useMutation({
+    mutationFn: (expenseId: string) => eventService.markExpensePaid(expenseId, 'BANK', 'AUTO-FRONTEND'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['expenses', eventId] });
+      queryClient.invalidateQueries({ queryKey: ['financial-summary', eventId] });
+      handleCloseApprovalDialog();
+    },
+  });
+
+  const approveBudgetMutation = useMutation({
+    mutationFn: (budgetItemId: string) => eventService.approveBudgetItem(budgetItemId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['budget-items', eventId] });
+    },
+  });
+
+  const rejectBudgetMutation = useMutation({
+    mutationFn: (budgetItemId: string) => eventService.rejectBudgetItem(budgetItemId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['budget-items', eventId] });
+    },
+  });
+
+  const createRequisitionMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedBudgetItem) {
+        throw new Error('Please select a budget item');
+      }
+
+      return financeService.createExpense({
+        event: eventId,
+        committee_id: selectedBudgetItem.committee,
+        budget_item: selectedBudgetItem.id,
+        vendor: `Requisition for ${selectedBudgetItem.item_name || selectedBudgetItem.title}`,
+        amount: parseFloat(newRequisition.requested_amount),
+        category: 'OTHER',
+        description: [
+          newRequisition.purpose,
+          newRequisition.date_needed ? `Date needed: ${newRequisition.date_needed}` : '',
+        ].filter(Boolean).join(' | '),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['expenses', eventId] });
+      setOpenRequisitionDialog(false);
+      setSelectedBudgetItem(null);
+      setNewRequisition({
+        requested_amount: '',
+        purpose: '',
+        date_needed: '',
+      });
+    },
+  });
+
   // Handlers
   const handleOpenCreateDialog = () => {
+    if (!canAllocateBudget) {
+      return;
+    }
     setFormData({
       item_name: '',
       category: '',
@@ -176,6 +289,16 @@ const BudgetManagementPage: React.FC = () => {
     setApprovalDialog(true);
   };
 
+  const handleOpenRequisitionDialog = (budgetItem: BudgetItem) => {
+    setSelectedBudgetItem(budgetItem);
+    setNewRequisition({
+      requested_amount: '',
+      purpose: '',
+      date_needed: '',
+    });
+    setOpenRequisitionDialog(true);
+  };
+
   const handleCloseApprovalDialog = () => {
     setApprovalDialog(false);
     setSelectedExpense(null);
@@ -198,7 +321,14 @@ const BudgetManagementPage: React.FC = () => {
   };
 
   // Get pending approval expenses
-  const pendingExpenses = expenses?.filter(e => !e.is_fully_approved && e.status !== 'REJECTED') || [];
+  const pendingExpenses = normalizedExpenses.filter(
+    (expense: ExpensePhase6) => !expense.is_fully_approved && expense.status !== 'REJECTED'
+  );
+  const totalBudget = normalizedBudgetItems.reduce(
+    (sum, item) => sum + parseFloat(item.allocated_amount || '0'),
+    0
+  );
+  const totalAvailableFunds = parseFloat(financialSummary?.collections?.total || '0');
 
   // Loading state
   if (loadingBudget || loadingExpenses || loadingSummary) {
@@ -232,6 +362,7 @@ const BudgetManagementPage: React.FC = () => {
             variant="contained"
             startIcon={<AddIcon />}
             onClick={handleOpenCreateDialog}
+            disabled={!canAllocateBudget}
             fullWidth={isMobile}
             sx={{ minHeight: 48 }}
           >
@@ -254,7 +385,7 @@ const BudgetManagementPage: React.FC = () => {
                     </Typography>
                   </Stack>
                   <Typography variant={isMobile ? 'h6' : 'h5'} fontWeight="bold">
-                    KSH 2,000,000
+                    {formatCurrency(totalBudget)}
                   </Typography>
                 </Stack>
               </CardContent>
@@ -267,11 +398,11 @@ const BudgetManagementPage: React.FC = () => {
                   <Stack direction="row" alignItems="center" spacing={1}>
                     <TrendingUpIcon color="success" fontSize="small" />
                     <Typography variant="caption" color="text.secondary">
-                      Allocated
+                      Available Funds
                     </Typography>
                   </Stack>
                   <Typography variant={isMobile ? 'h6' : 'h5'} fontWeight="bold">
-                    KSH 1,800,000
+                    {formatCurrency(totalAvailableFunds)}
                   </Typography>
                 </Stack>
               </CardContent>
@@ -329,11 +460,12 @@ const BudgetManagementPage: React.FC = () => {
                   <TableCell align="right">Allocated</TableCell>
                   <TableCell align="right">Spent</TableCell>
                   {!isMobile && <TableCell>Utilization</TableCell>}
+                  <TableCell align="center">Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {budgetItems && budgetItems.length > 0 ? (
-                  budgetItems.map((item) => {
+                {normalizedBudgetItems.length > 0 ? (
+                  normalizedBudgetItems.map((item: BudgetItem) => {
                     const allocated = parseFloat(item.allocated_amount || '0');
                     const spent = parseFloat(item.spent_amount || '0');
                     const utilization = calculateBudgetUtilization(allocated, spent);
@@ -380,12 +512,63 @@ const BudgetManagementPage: React.FC = () => {
                             </Stack>
                           </TableCell>
                         )}
+                        <TableCell align="center">
+                          <Stack direction={isMobile ? 'column' : 'row'} spacing={1} justifyContent="center">
+                            {(item.status === 'APPROVED' || item.status === 'COMPLETED') && canRequestRequisition && (
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={<RequestFundsIcon />}
+                                onClick={() => handleOpenRequisitionDialog(item)}
+                              >
+                                Request Funds
+                              </Button>
+                            )}
+                            {item.status === 'PENDING' && canReviewBudgetItems && (
+                              <>
+                                <Tooltip title="Approve budget item">
+                                  <span>
+                                    <Button
+                                      size="small"
+                                      color="success"
+                                      variant="contained"
+                                      startIcon={<ApproveIcon />}
+                                      onClick={() => approveBudgetMutation.mutate(String(item.id))}
+                                      disabled={approveBudgetMutation.isPending || rejectBudgetMutation.isPending}
+                                    >
+                                      Approve
+                                    </Button>
+                                  </span>
+                                </Tooltip>
+                                <Tooltip title="Reject budget item">
+                                  <span>
+                                    <Button
+                                      size="small"
+                                      color="error"
+                                      variant="outlined"
+                                      startIcon={<RejectIcon />}
+                                      onClick={() => rejectBudgetMutation.mutate(String(item.id))}
+                                      disabled={approveBudgetMutation.isPending || rejectBudgetMutation.isPending}
+                                    >
+                                      Reject
+                                    </Button>
+                                  </span>
+                                </Tooltip>
+                              </>
+                            )}
+                            {item.status === 'PENDING' && !canReviewBudgetItems && (
+                              <Typography variant="caption" color="text.secondary">
+                                Awaiting approval
+                              </Typography>
+                            )}
+                          </Stack>
+                        </TableCell>
                       </TableRow>
                     );
                   })
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={isMobile ? 3 : 5} align="center" sx={{ py: 4 }}>
+                    <TableCell colSpan={isMobile ? 4 : 6} align="center" sx={{ py: 4 }}>
                       <Typography variant="body2" color="text.secondary">
                         No budget items created yet
                       </Typography>
@@ -431,7 +614,7 @@ const BudgetManagementPage: React.FC = () => {
               </TableHead>
               <TableBody>
                 {pendingExpenses.length > 0 ? (
-                  pendingExpenses.map((expense) => (
+                  pendingExpenses.map((expense: ExpensePhase6) => (
                     <TableRow key={expense.id} hover>
                       <TableCell>
                         <Typography variant="body2" fontWeight="bold">
@@ -474,14 +657,16 @@ const BudgetManagementPage: React.FC = () => {
                         </Stack>
                       </TableCell>
                       <TableCell align="center">
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          onClick={() => handleViewExpense(expense)}
-                          sx={{ minHeight: 32 }}
-                        >
-                          Review
-                        </Button>
+                        {(canApproveAsChair || canApproveAsTreasurer || canApproveAsFinance) && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => handleViewExpense(expense)}
+                            sx={{ minHeight: 32 }}
+                          >
+                            Review
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))
@@ -644,8 +829,101 @@ const BudgetManagementPage: React.FC = () => {
           )}
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
+          {selectedExpense && selectedExpense.status === 'PENDING' && canApproveAsChair && (
+            <Button
+              onClick={() => approveChairMutation.mutate(String(selectedExpense.id))}
+              variant="contained"
+              color="primary"
+            >
+              Approve as Chair
+            </Button>
+          )}
+          {selectedExpense && selectedExpense.status === 'APPROVED_CHAIR' && canApproveAsTreasurer && (
+            <Button
+              onClick={() => approveTreasurerMutation.mutate(String(selectedExpense.id))}
+              variant="contained"
+              color="primary"
+            >
+              Approve as Treasurer
+            </Button>
+          )}
+          {selectedExpense && selectedExpense.status === 'APPROVED_TREASURER' && canApproveAsFinance && (
+            <Button
+              onClick={() => approveFinanceMutation.mutate(String(selectedExpense.id))}
+              variant="contained"
+              color="primary"
+            >
+              Approve as Finance
+            </Button>
+          )}
+          {selectedExpense && ['FULLY_APPROVED', 'APPROVED_FINANCE'].includes(selectedExpense.status as string) && canApproveAsTreasurer && (
+            <Button
+              onClick={() => markPaidMutation.mutate(String(selectedExpense.id))}
+              variant="contained"
+              color="success"
+            >
+              Mark as Paid
+            </Button>
+          )}
           <Button onClick={handleCloseApprovalDialog} sx={{ minHeight: 40 }}>
             Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={openRequisitionDialog}
+        onClose={() => setOpenRequisitionDialog(false)}
+        maxWidth="sm"
+        fullWidth
+        fullScreen={isMobile}
+      >
+        <DialogTitle>Request Funds</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            {selectedBudgetItem && (
+              <Alert severity="info">
+                Creating a requisition against <strong>{selectedBudgetItem.item_name}</strong>
+              </Alert>
+            )}
+            <TextField
+              label="Requested Amount (KSH)"
+              type="number"
+              fullWidth
+              value={newRequisition.requested_amount}
+              onChange={(e) => setNewRequisition({ ...newRequisition, requested_amount: e.target.value })}
+              inputProps={{ min: 0, step: '0.01' }}
+            />
+            <TextField
+              label="Purpose"
+              fullWidth
+              multiline
+              rows={3}
+              value={newRequisition.purpose}
+              onChange={(e) => setNewRequisition({ ...newRequisition, purpose: e.target.value })}
+            />
+            <TextField
+              label="Date Needed"
+              type="date"
+              fullWidth
+              value={newRequisition.date_needed}
+              onChange={(e) => setNewRequisition({ ...newRequisition, date_needed: e.target.value })}
+              InputLabelProps={{ shrink: true }}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setOpenRequisitionDialog(false)}>Cancel</Button>
+          <Button
+            onClick={() => createRequisitionMutation.mutate()}
+            variant="contained"
+            disabled={
+              !newRequisition.requested_amount ||
+              !newRequisition.purpose ||
+              createRequisitionMutation.isPending
+            }
+          >
+            {createRequisitionMutation.isPending ? 'Submitting...' : 'Submit Requisition'}
           </Button>
         </DialogActions>
       </Dialog>

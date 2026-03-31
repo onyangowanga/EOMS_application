@@ -19,7 +19,7 @@ const VerifyOTPPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const identifier = location.state?.identifier || '';
-  const deliveryMethod = location.state?.deliveryMethod || 'sms';
+  const deliveryMethod = location.state?.deliveryMethod || 'email';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -2,18 +2,16 @@ import React from 'react';
 import {
   Box,
   Typography,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
   Button,
   Chip,
+  Alert,
+  Skeleton,
 } from '@mui/material';
-import { CheckCircle, Cancel } from '@mui/icons-material';
+import { CheckCircle } from '@mui/icons-material';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
+import { eventService } from '../services/event.service';
+import ResponsiveDataView from '../components/ResponsiveDataView';
 
 /**
  * Treasurer Confirmation Page - Funds Mobilisation Module
@@ -21,97 +19,75 @@ import { useParams } from 'react-router-dom';
  */
 const TreasurerConfirmationPage: React.FC = () => {
   const { eventId } = useParams<{ eventId: string }>();
+  const queryClient = useQueryClient();
 
-  const submissions = [
-    {
-      id: 1,
-      cluster: 'North Region',
-      leader: 'John Kamau',
-      amount: 250000,
-      submittedDate: '2026-03-29',
-      status: 'PENDING',
+  const { data: submissions = [], isLoading } = useQuery({
+    queryKey: ['cluster-deposits', eventId, 'treasurer-confirmations'],
+    queryFn: () => eventService.getClusterDeposits(eventId!),
+    enabled: !!eventId,
+    refetchInterval: 10000,
+  });
+
+  const confirmDepositMutation = useMutation({
+    mutationFn: (depositId: string) => eventService.confirmClusterDeposit(depositId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cluster-deposits', eventId] });
+      queryClient.invalidateQueries({ queryKey: ['financial-summary', eventId] });
     },
-    {
-      id: 2,
-      cluster: 'South Region',
-      leader: 'Mary Wanjiru',
-      amount: 180000,
-      submittedDate: '2026-03-28',
-      status: 'CONFIRMED',
-    },
-  ];
+  });
 
-  const handleConfirm = (id: number) => {
-    // TODO: Implement confirmation
-    console.log('Confirming submission:', id);
-  };
+  const pendingSubmissions = submissions.filter((submission: any) => !submission.confirmed_by_treasurer);
 
-  const handleReject = (id: number) => {
-    // TODO: Implement rejection
-    console.log('Rejecting submission:', id);
-  };
+  if (isLoading) {
+    return <Skeleton variant="rectangular" height={300} />;
+  }
 
   return (
     <Box>
       <Typography variant="h4" gutterBottom>
         Cluster Fund Submissions
       </Typography>
+      <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+        Review cluster deposits in a full desktop table or confirm them directly from mobile cards.
+      </Typography>
 
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Cluster</TableCell>
-              <TableCell>Leader</TableCell>
-              <TableCell>Submitted Date</TableCell>
-              <TableCell align="right">Amount (KES)</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell align="right">Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {submissions.map((submission) => (
-              <TableRow key={submission.id}>
-                <TableCell>{submission.cluster}</TableCell>
-                <TableCell>{submission.leader}</TableCell>
-                <TableCell>{submission.submittedDate}</TableCell>
-                <TableCell align="right">{submission.amount.toLocaleString()}</TableCell>
-                <TableCell>
-                  <Chip
-                    label={submission.status}
-                    size="small"
-                    color={submission.status === 'CONFIRMED' ? 'success' : 'warning'}
-                  />
-                </TableCell>
-                <TableCell align="right">
-                  {submission.status === 'PENDING' && (
-                    <Box display="flex" justifyContent="flex-end" gap={1}>
-                      <Button
-                        size="small"
-                        variant="contained"
-                        color="success"
-                        startIcon={<CheckCircle />}
-                        onClick={() => handleConfirm(submission.id)}
-                      >
-                        Confirm
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        color="error"
-                        startIcon={<Cancel />}
-                        onClick={() => handleReject(submission.id)}
-                      >
-                        Reject
-                      </Button>
-                    </Box>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
+      <Alert severity="info" sx={{ mb: 2 }}>
+        Confirm submitted cluster funds here. Confirmed submissions flow into treasury totals automatically.
+      </Alert>
+
+      <ResponsiveDataView
+        data={pendingSubmissions as any[]}
+        getRowId={(submission) => submission.id}
+        emptyMessage="No pending cluster submissions"
+        tableAriaLabel="Pending cluster submissions"
+        columns={[
+          { key: 'cluster', label: 'Cluster', render: (submission) => submission.cluster_name },
+          { key: 'mode', label: 'Mode', render: (submission) => submission.deposit_channel_display || submission.deposit_channel },
+          { key: 'date', label: 'Submitted Date', render: (submission) => new Date(submission.created_at).toLocaleDateString() },
+          { key: 'amount', label: 'Amount (KES)', align: 'right', render: (submission) => parseFloat(submission.amount || '0').toLocaleString() },
+          { key: 'status', label: 'Status', render: (submission) => <Chip label={submission.confirmed_by_treasurer ? 'CONFIRMED' : 'PENDING'} size="small" color={submission.confirmed_by_treasurer ? 'success' : 'warning'} /> },
+        ]}
+        mobileTitle={(submission) => submission.cluster_name}
+        mobileSubtitle={(submission) => submission.deposit_channel_display || submission.deposit_channel}
+        mobileFields={[
+          { label: 'Submitted', render: (submission) => new Date(submission.created_at).toLocaleDateString() },
+          { label: 'Amount', render: (submission) => `KES ${parseFloat(submission.amount || '0').toLocaleString()}` },
+          { label: 'Status', render: (submission) => <Chip label={submission.confirmed_by_treasurer ? 'CONFIRMED' : 'PENDING'} size="small" color={submission.confirmed_by_treasurer ? 'success' : 'warning'} /> },
+        ]}
+        rowActions={(submission) => (
+          !submission.confirmed_by_treasurer ? (
+            <Button
+              size="small"
+              variant="contained"
+              color="success"
+              startIcon={<CheckCircle />}
+              onClick={() => confirmDepositMutation.mutate(submission.id)}
+            >
+              Confirm
+            </Button>
+          ) : null
+        )}
+      />
     </Box>
   );
 };

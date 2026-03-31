@@ -47,6 +47,7 @@ class TaskSerializer(serializers.ModelSerializer):
             'created_by', 'created_by_name',
             'status', 'status_display',
             'priority', 'priority_display',
+            'estimated_cost',
             'progress_percentage', 'progress_status',
             'deadline', 'days_remaining', 'completed_at',
             'comments', 'comment_count',
@@ -64,8 +65,13 @@ class TaskSerializer(serializers.ModelSerializer):
         from django.utils import timezone
         from datetime import timedelta
         
+        if not obj.deadline:
+            return None
+        
         today = timezone.now().date()
-        delta = obj.deadline - today
+        # Convert datetime deadline to date for comparison
+        deadline_date = obj.deadline.date() if hasattr(obj.deadline, 'date') else obj.deadline
+        delta = deadline_date - today
         return delta.days
     
     def get_progress_status(self, obj):
@@ -99,7 +105,7 @@ class TaskListSerializer(serializers.ModelSerializer):
             'id', 'event', 'event_name', 'title',
             'committee_name', 'assigned_to_name',
             'status', 'status_display', 'priority',
-            'progress_percentage', 'progress_status',
+            'estimated_cost', 'progress_percentage', 'progress_status',
             'deadline'
         ]
     
@@ -126,7 +132,7 @@ class TaskCreateSerializer(serializers.ModelSerializer):
         model = Task
         fields = [
             'event', 'title', 'description', 'committee_id', 'assigned_to_id',
-            'priority', 'deadline', 'progress_percentage'
+            'priority', 'deadline', 'progress_percentage', 'estimated_cost'
         ]
     
     def validate_progress_percentage(self, value):
@@ -144,7 +150,7 @@ class TaskUpdateSerializer(serializers.ModelSerializer):
         model = Task
         fields = [
             'title', 'description', 'assigned_to_id', 'status',
-            'priority', 'deadline', 'progress_percentage'
+            'priority', 'deadline', 'progress_percentage', 'estimated_cost'
         ]
     
     def validate_progress_percentage(self, value):

@@ -8,10 +8,11 @@ class CommitteeMemberSerializer(serializers.ModelSerializer):
     
     user = UserSerializer(read_only=True)
     user_id = serializers.IntegerField(write_only=True)
+    role_display = serializers.CharField(source='get_role_display', read_only=True)
     
     class Meta:
         model = CommitteeMember
-        fields = ['id', 'user', 'user_id', 'is_lead', 'role_description', 'joined_at']
+        fields = ['id', 'user', 'user_id', 'role', 'role_display', 'is_lead', 'role_description', 'joined_at']
         read_only_fields = ['id', 'joined_at']
 
 

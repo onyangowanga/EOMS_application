@@ -11,10 +11,13 @@ import {
   Group,
   Assignment,
   Business,
+  AttachMoney,
+  CheckCircle,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import { committeeService } from '../services/committee.service';
 import { taskService } from '../services/task.service';
+import { financeService } from '../services/finance.service';
 import { useAuth } from '../contexts/AuthContext';
 
 const DashboardPage: React.FC = () => {
@@ -30,30 +33,68 @@ const DashboardPage: React.FC = () => {
     queryFn: taskService.getMyTasks,
   });
 
+  const { data: allTasks } = useQuery({
+    queryKey: ['all-tasks'],
+    queryFn: () => taskService.getAll(),
+  });
+
+  const { data: collections } = useQuery({
+    queryKey: ['all-collections'],
+    queryFn: () => financeService.getCollections(),
+  });
+
+  const totalCollectionAmount = React.useMemo(() => {
+    if (!collections?.length) return 0;
+    return collections.reduce((sum, c) => sum + parseFloat(c.amount || '0'), 0);
+  }, [collections]);
+
+  const formatCurrency = (amount: number) =>
+    new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', maximumFractionDigits: 0 }).format(amount);
+
+  const completedTasks = allTasks?.filter(t => t.status === 'COMPLETED').length || 0;
+
   const stats = [
     {
       title: 'My Committees',
       value: committees?.length || 0,
       icon: <Group sx={{ fontSize: 40 }} />,
       color: '#1976d2',
+      isCount: true,
     },
     {
-      title: 'My Tasks',
-      value: myTasks?.length || 0,
+      title: 'Total Tasks',
+      value: allTasks?.length || 0,
       icon: <Assignment sx={{ fontSize: 40 }} />,
       color: '#2e7d32',
+      isCount: true,
     },
     {
-      title: 'Pending Tasks',
-      value: myTasks?.filter(t => t.status === 'PENDING').length || 0,
-      icon: <Assignment sx={{ fontSize: 40 }} />,
-      color: '#ed6c02',
+      title: 'Completed Tasks',
+      value: completedTasks,
+      icon: <CheckCircle sx={{ fontSize: 40 }} />,
+      color: '#00897b',
+      isCount: true,
     },
     {
       title: 'Active Committees',
       value: committees?.filter(c => c.status === 'ACTIVE').length || 0,
       icon: <Business sx={{ fontSize: 40 }} />,
       color: '#9c27b0',
+      isCount: true,
+    },
+    {
+      title: 'Total Collections',
+      value: formatCurrency(totalCollectionAmount),
+      icon: <AttachMoney sx={{ fontSize: 40 }} />,
+      color: '#c62828',
+      isCount: false,
+    },
+    {
+      title: 'Pending Tasks',
+      value: myTasks?.filter(t => t.status === 'PENDING').length || 0,
+      icon: <Assignment sx={{ fontSize: 40 }} />,
+      color: '#ed6c02',
+      isCount: true,
     },
   ];
 
@@ -68,7 +109,7 @@ const DashboardPage: React.FC = () => {
 
       <Grid container spacing={3} sx={{ mt: 2 }}>
         {stats.map((stat, index) => (
-          <Grid item xs={12} sm={6} md={3} key={index}>
+          <Grid item xs={12} sm={6} md={4} key={index}>
             <Card>
               <CardContent>
                 <Box display="flex" alignItems="center" justifyContent="space-between">
@@ -76,7 +117,7 @@ const DashboardPage: React.FC = () => {
                     <Typography color="text.secondary" variant="body2" gutterBottom>
                       {stat.title}
                     </Typography>
-                    <Typography variant="h4">
+                    <Typography variant={stat.isCount ? 'h4' : 'h5'} fontWeight="bold">
                       {stat.value}
                     </Typography>
                   </Box>

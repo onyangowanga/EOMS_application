@@ -61,6 +61,14 @@ class Task(models.Model):
         default=Decimal('0.00'),
         help_text="Task completion percentage (0-100)"
     )
+
+    estimated_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Optional estimated cost for task execution"
+    )
     
     deadline = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)

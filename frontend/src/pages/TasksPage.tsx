@@ -4,12 +4,6 @@ import {
   Paper,
   Typography,
   Button,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Chip,
   IconButton,
   Dialog,
@@ -23,7 +17,10 @@ import {
   InputLabel,
   Alert,
   CircularProgress,
+  Stack,
+  useMediaQuery,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
   Add as AddIcon,
   Visibility as VisibilityIcon,
@@ -33,8 +30,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { taskService } from '../services/task.service';
 import { committeeService } from '../services/committee.service';
 import type { Task, TaskCreate, Committee } from '../types/index';
+import ResponsiveDataView from '../components/ResponsiveDataView';
 
 const TasksPage: React.FC = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const queryClient = useQueryClient();
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedCommittee, setSelectedCommittee] = useState<number | ''>('');
@@ -46,6 +46,7 @@ const TasksPage: React.FC = () => {
     committee_id: undefined,
     assigned_to_id: undefined,
     priority: 'MEDIUM',
+    estimated_cost: undefined,
     deadline: '',
   });
   const [error, setError] = useState('');
@@ -82,6 +83,7 @@ const TasksPage: React.FC = () => {
       committee_id: undefined,
       assigned_to_id: undefined,
       priority: 'MEDIUM',
+      estimated_cost: undefined,
       deadline: '',
     });
     setError('');
@@ -144,21 +146,27 @@ const TasksPage: React.FC = () => {
 
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Tasks</Typography>
+      <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={2} mb={3}>
+        <Box>
+          <Typography variant="h4">Tasks</Typography>
+          <Typography variant="body1" color="text.secondary">
+            Desktop keeps the full planning table. Mobile switches to actionable task cards.
+          </Typography>
+        </Box>
         <Button
           variant="contained"
           startIcon={<AddIcon />}
           onClick={() => setOpenDialog(true)}
+          fullWidth={isMobile}
         >
           Create Task
         </Button>
-      </Box>
+      </Stack>
 
       {/* Filters */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Box display="flex" gap={2} flexWrap="wrap">
-          <FormControl sx={{ minWidth: 200 }}>
+      <Paper sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 5 }}>
+        <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(3, minmax(0, 1fr))' }} gap={2}>
+          <FormControl fullWidth>
             <InputLabel>Committee</InputLabel>
             <Select
               value={selectedCommittee}
@@ -174,7 +182,7 @@ const TasksPage: React.FC = () => {
             </Select>
           </FormControl>
 
-          <FormControl sx={{ minWidth: 150 }}>
+          <FormControl fullWidth>
             <InputLabel>Status</InputLabel>
             <Select
               value={filterStatus}
@@ -189,7 +197,7 @@ const TasksPage: React.FC = () => {
             </Select>
           </FormControl>
 
-          <FormControl sx={{ minWidth: 150 }}>
+          <FormControl fullWidth>
             <InputLabel>Priority</InputLabel>
             <Select
               value={filterPriority}
@@ -206,75 +214,66 @@ const TasksPage: React.FC = () => {
         </Box>
       </Paper>
 
-      {/* Tasks Table */}
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Title</TableCell>
-              <TableCell>Committee</TableCell>
-              <TableCell>Assigned To</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Priority</TableCell>
-              <TableCell>Deadline</TableCell>
-              <TableCell>Created</TableCell>
-              <TableCell align="center">Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {filteredTasks && filteredTasks.length > 0 ? (
-              filteredTasks.map((task: Task) => (
-                <TableRow key={task.id} hover>
-                  <TableCell>{task.title}</TableCell>
-                  <TableCell>{task.committee.name}</TableCell>
-                  <TableCell>
-                    {task.assigned_to ? task.assigned_to.full_name : 'Unassigned'}
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={task.status}
-                      color={getStatusColor(task.status)}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={task.priority}
-                      color={getPriorityColor(task.priority)}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    {task.deadline
-                      ? new Date(task.deadline).toLocaleDateString()
-                      : 'No deadline'}
-                  </TableCell>
-                  <TableCell>
-                    {new Date(task.created_at).toLocaleDateString()}
-                  </TableCell>
-                  <TableCell align="center">
-                    <IconButton size="small" color="primary">
-                      <VisibilityIcon />
-                    </IconButton>
-                    <IconButton size="small" color="secondary">
-                      <EditIcon />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell colSpan={8} align="center">
-                  <Typography color="text.secondary">No tasks found</Typography>
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
+      <ResponsiveDataView
+        data={filteredTasks || []}
+        getRowId={(task) => task.id}
+        emptyMessage="No tasks found"
+        tableAriaLabel="Tasks"
+        columns={[
+          { key: 'title', label: 'Title', render: (task) => task.title },
+          { key: 'committee', label: 'Committee', render: (task) => task.committee.name },
+          { key: 'assigned', label: 'Assigned To', render: (task) => task.assigned_to ? task.assigned_to.full_name : 'Unassigned' },
+          {
+            key: 'status',
+            label: 'Status',
+            render: (task) => <Chip label={task.status} color={getStatusColor(task.status)} size="small" />,
+          },
+          {
+            key: 'priority',
+            label: 'Priority',
+            render: (task) => <Chip label={task.priority} color={getPriorityColor(task.priority)} size="small" />,
+          },
+          {
+            key: 'cost',
+            label: 'Estimated Cost',
+            render: (task) => task.estimated_cost ? `KES ${Number(task.estimated_cost).toLocaleString()}` : 'N/A',
+            align: 'right',
+          },
+          {
+            key: 'deadline',
+            label: 'Deadline',
+            render: (task) => task.deadline ? new Date(task.deadline).toLocaleDateString() : 'No deadline',
+          },
+          {
+            key: 'created',
+            label: 'Created',
+            render: (task) => new Date(task.created_at).toLocaleDateString(),
+          },
+        ]}
+        mobileTitle={(task) => task.title}
+        mobileSubtitle={(task) => task.committee.name}
+        mobileFields={[
+          { label: 'Assigned', render: (task) => task.assigned_to ? task.assigned_to.full_name : 'Unassigned' },
+          { label: 'Deadline', render: (task) => task.deadline ? new Date(task.deadline).toLocaleDateString() : 'No deadline' },
+          { label: 'Status', render: (task) => <Chip label={task.status} color={getStatusColor(task.status)} size="small" /> },
+          { label: 'Priority', render: (task) => <Chip label={task.priority} color={getPriorityColor(task.priority)} size="small" /> },
+          { label: 'Est. Cost', render: (task) => task.estimated_cost ? `KES ${Number(task.estimated_cost).toLocaleString()}` : 'N/A' },
+          { label: 'Created', render: (task) => new Date(task.created_at).toLocaleDateString() },
+        ]}
+        rowActions={() => (
+          <Box display="flex" justifyContent="flex-end" gap={0.5}>
+            <IconButton size="small" color="primary">
+              <VisibilityIcon />
+            </IconButton>
+            <IconButton size="small" color="secondary">
+              <EditIcon />
+            </IconButton>
+          </Box>
+        )}
+      />
 
       {/* Create Task Dialog */}
-      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>
+      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth fullScreen={isMobile}>
         <DialogTitle>Create New Task</DialogTitle>
         <DialogContent>
           {error && (
@@ -326,6 +325,18 @@ const TasksPage: React.FC = () => {
                 <MenuItem value="URGENT">Urgent</MenuItem>
               </Select>
             </FormControl>
+            <TextField
+              label="Estimated Cost (Optional)"
+              type="number"
+              fullWidth
+              inputProps={{ min: 0, step: '0.01' }}
+              value={formData.estimated_cost ?? ''}
+              onChange={(e) => setFormData({
+                ...formData,
+                estimated_cost: e.target.value ? Number(e.target.value) : undefined,
+              })}
+              helperText="If provided, a budget item will be created automatically."
+            />
             <TextField
               label="Deadline"
               type="date"

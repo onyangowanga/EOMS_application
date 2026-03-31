@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
-import type { User } from '../types/index';
+import type { RBACRole, User } from '../types/index';
 import { authService } from '../services/auth.service';
+import { hasAnyRole as checkAnyRole, normalizeUserRoles } from '../utils/rbac';
 
 interface AuthContextType {
   user: User | null;
@@ -11,6 +12,8 @@ interface AuthContextType {
   verifyOTP: (identifier: string, otpCode: string) => Promise<void>;
   logout: () => void;
   updateUser: (user: User) => void;
+  userRoles: RBACRole[];
+  hasRole: (role: RBACRole | RBACRole[]) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -57,6 +60,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setUser(updatedUser);
   };
 
+  const userRoles = normalizeUserRoles(user);
+
+  const hasRole = (role: RBACRole | RBACRole[]) => {
+    return checkAnyRole(user, role);
+  };
+
   const value = {
     user,
     isAuthenticated: !!user,
@@ -65,6 +74,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     verifyOTP,
     logout,
     updateUser,
+    userRoles,
+    hasRole,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

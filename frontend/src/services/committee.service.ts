@@ -1,5 +1,5 @@
 import apiClient from './api';
-import type { Committee, AddMemberRequest, CommitteeMember } from '../types/index';
+import type { Committee, AddMemberRequest, CommitteeMember, CommitteePhase6, BudgetItem } from '../types/index';
 
 export const committeeService = {
   getAll: async (): Promise<Committee[]> => {
@@ -7,7 +7,7 @@ export const committeeService = {
     return response.data.results || response.data;
   },
 
-  getById: async (id: number): Promise<Committee> => {
+  getById: async (id: number): Promise<CommitteePhase6> => {
     const response = await apiClient.get(`/committees/${id}/`);
     return response.data;
   },
@@ -42,6 +42,27 @@ export const committeeService = {
 
   getMyCommittees: async (): Promise<Committee[]> => {
     const response = await apiClient.get('/committees/my_committees/');
+    return response.data;
+  },
+
+  // Budget Item methods
+  getBudgetItems: async (committeeId: number): Promise<BudgetItem[]> => {
+    const response = await apiClient.get(`/committees/${committeeId}/budget_items/`);
+    return response.data;
+  },
+
+  createBudgetItem: async (committeeId: number, data: {
+    title: string;
+    description?: string;
+    estimated_cost: number;
+    linked_task?: number;
+  }): Promise<BudgetItem> => {
+    const response = await apiClient.post(`/committees/${committeeId}/budget_items/`, {
+      item_name: data.title,
+      description: data.description,
+      allocated_amount: data.estimated_cost,
+      linked_task: data.linked_task,
+    });
     return response.data;
   },
 };

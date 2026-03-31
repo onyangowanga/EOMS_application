@@ -7,11 +7,18 @@ from django.db.models import Sum, Q, Count
 from decimal import Decimal
 
 from .models import Collection, Expense
+from apps.events.models import EventMember
 from .serializers import (
     CollectionSerializer, CollectionCreateSerializer, CollectionListSerializer,
     ExpenseSerializer, ExpenseCreateSerializer, ExpenseListSerializer,
     FinanceSummarySerializer
 )
+from apps.users.rbac import resolve_user_roles
+
+
+def _has_any_role(user, event_id, allowed_roles):
+    user_roles = resolve_user_roles(user, event_id)
+    return bool(user_roles.intersection(set(allowed_roles)))
 
 
 class CollectionViewSet(viewsets.ModelViewSet):
@@ -52,6 +59,16 @@ class CollectionViewSet(viewsets.ModelViewSet):
         elif self.action == 'create':
             return CollectionCreateSerializer
         return CollectionSerializer
+
+    def create(self, request, *args, **kwargs):
+        event_id = request.data.get('event')
+        if not _has_any_role(
+            request.user,
+            event_id,
+            {'chair', 'secretary', 'treasurer', 'finance_member', 'executive_admin'}
+        ):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        return super().create(request, *args, **kwargs)
     
     def perform_create(self, serializer):
         serializer.save(recorded_by=self.request.user)
@@ -130,14 +147,63 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         elif self.action == 'create':
             return ExpenseCreateSerializer
         return ExpenseSerializer
+
+    def create(self, request, *args, **kwargs):
+        event_id = request.data.get('event')
+        if not _has_any_role(
+            request.user,
+            event_id,
+            {
+                'chair',
+                'secretary',
+                'treasurer',
+                'finance_member',
+                'subcommittee_lead',
+                'executive_admin',
+            },
+        ):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        return super().create(request, *args, **kwargs)
     
     def perform_create(self, serializer):
         serializer.save(requested_by=self.request.user, status='PENDING')
+
+    def _get_event_role(self, user, event_id):
+        membership = EventMember.objects.filter(
+            event_id=event_id,
+            user=user,
+            is_active=True,
+        ).first()
+        return membership.role if membership else None
+
+    def _is_admin(self, user):
+        return user.role == 'ADMIN'
+
+    def _can_approve_as_chair(self, user, event_id):
+        return self._is_admin(user) or _has_any_role(user, event_id, {'chair', 'executive_admin'})
+
+    def _can_approve_as_treasurer(self, user, event_id):
+        return self._is_admin(user) or _has_any_role(user, event_id, {'treasurer', 'executive_admin'})
+
+    def _can_approve_as_finance(self, user):
+        return self._is_admin(user) or _has_any_role(user, None, {'finance_member', 'executive_admin'})
+
+    def _can_reject(self, user, event_id):
+        return self._is_admin(user) or _has_any_role(
+            user,
+            event_id,
+            {'chair', 'treasurer', 'finance_member', 'executive_admin'},
+        )
     
     @action(detail=True, methods=['post'])
     def approve_as_chair(self, request, pk=None):
         """Chairman approves expense (1st tier)"""
         expense = self.get_object()
+
+        if not self._can_approve_as_chair(request.user, expense.event_id):
+            return Response({
+                'error': 'Only event Chairman can perform chair approval'
+            }, status=status.HTTP_403_FORBIDDEN)
         
         if expense.status != 'PENDING':
             return Response({
@@ -154,6 +220,11 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     def approve_as_treasurer(self, request, pk=None):
         """Treasurer approves expense (2nd tier)"""
         expense = self.get_object()
+
+        if not self._can_approve_as_treasurer(request.user, expense.event_id):
+            return Response({
+                'error': 'Only event Treasurer can perform treasurer approval'
+            }, status=status.HTTP_403_FORBIDDEN)
         
         if expense.status != 'APPROVED_CHAIR':
             return Response({
@@ -170,6 +241,11 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     def approve_as_finance(self, request, pk=None):
         """Finance member approves expense (3rd tier)"""
         expense = self.get_object()
+
+        if not self._can_approve_as_finance(request.user):
+            return Response({
+                'error': 'Only finance members can perform this action'
+            }, status=status.HTTP_403_FORBIDDEN)
         
         if expense.status != 'APPROVED_TREASURER':
             return Response({
@@ -186,6 +262,11 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     def reject(self, request, pk=None):
         """Reject an expense (any tier can reject)"""
         expense = self.get_object()
+
+        if not self._can_reject(request.user, expense.event_id):
+            return Response({
+                'error': 'Only Chairman, Treasurer, or Finance Committee can reject requisitions'
+            }, status=status.HTTP_403_FORBIDDEN)
         
         if expense.status == 'PAID':
             return Response({
@@ -201,6 +282,11 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     def mark_paid(self, request, pk=None):
         """Mark expense as paid and update budget"""
         expense = self.get_object()
+
+        if not self._can_approve_as_treasurer(request.user, expense.event_id):
+            return Response({
+                'error': 'Only event Treasurer can execute payment'
+            }, status=status.HTTP_403_FORBIDDEN)
         
         if expense.status != 'FULLY_APPROVED':
             return Response({
@@ -222,14 +308,19 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def pending_approvals(self, request):
         """Get expenses pending approval (by current user's role)"""
-        # This would need role-based logic
-        # For now, return all pending expenses
+        event_id = request.query_params.get('event_id')
+        if not _has_any_role(
+            request.user,
+            event_id,
+            {'chair', 'treasurer', 'finance_member', 'executive_admin'}
+        ):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
         expenses = Expense.objects.filter(
             status__in=['PENDING', 'APPROVED_CHAIR', 'APPROVED_TREASURER']
         )
         
         # Filter by event if provided
-        event_id = request.query_params.get('event_id')
         if event_id:
             expenses = expenses.filter(event_id=event_id)
         

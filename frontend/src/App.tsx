@@ -1,12 +1,13 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import DashboardRedirect from './components/DashboardRedirect';
+import theme from './theme';
 
 // Authentication Pages
 import LoginPage from './pages/LoginPage';
@@ -20,6 +21,7 @@ import EventDashboard from './pages/EventDashboard';
 
 // Subcommittees Pages
 import SubcommitteesListPage from './pages/SubcommitteesListPage';
+import RoleCommitteesPage from './pages/RoleCommitteesPage';
 import CreateSubcommitteePage from './pages/CreateSubcommitteePage';
 import SubcommitteeDetailsPage from './pages/SubcommitteeDetailsPage';
 
@@ -43,6 +45,7 @@ import ApprovalCenterPage from './pages/ApprovalCenterPage';
 
 // Reports Pages
 import ReportsPage from './pages/ReportsPage';
+import EventReportsPage from './pages/EventReportsPage';
 import EventSummaryReportPage from './pages/EventSummaryReportPage';
 import FinancialReportPage from './pages/FinancialReportPage';
 import SubcommitteeReportsPage from './pages/SubcommitteeReportsPage';
@@ -73,22 +76,7 @@ const queryClient = new QueryClient({
   },
 });
 
-// Create a theme
-const theme = createTheme({
-  palette: {
-    primary: {
-      main: '#1976d2',
-    },
-    secondary: {
-      main: '#dc004e',
-    },
-  },
-});
-
 function App() {
-  console.log('App component rendering...');
-  console.log('API URL:', import.meta.env.VITE_API_URL);
-  
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
@@ -124,6 +112,7 @@ function App() {
                   <Route path="events/:eventId/dashboard" element={<EventDashboard />} />
                   
                   {/* Subcommittees Routes */}
+                  <Route path="events/:eventId/role-committees" element={<RoleCommitteesPage />} />
                   <Route path="events/:eventId/subcommittees" element={<SubcommitteesListPage />} />
                   <Route path="events/:eventId/subcommittees/create" element={<CreateSubcommitteePage />} />
                   <Route path="events/:eventId/subcommittees/:subcommitteeId" element={<SubcommitteeDetailsPage />} />
@@ -149,7 +138,7 @@ function App() {
                   <Route path="events/:eventId/approvals" element={<ApprovalCenterPage />} />
                   
                   {/* Reports Routes */}
-                  <Route path="events/:eventId/reports" element={<ReportsPage />} />
+                  <Route path="events/:eventId/reports" element={<EventReportsPage />} />
                   <Route path="events/:eventId/reports/event-summary" element={<EventSummaryReportPage />} />
                   <Route path="events/:eventId/reports/financial" element={<FinancialReportPage />} />
                   <Route path="events/:eventId/reports/subcommittees" element={<SubcommitteeReportsPage />} />
@@ -160,14 +149,42 @@ function App() {
                   <Route path="settings" element={<SettingsPage />} />
                   
                   {/* Admin Routes */}
-                  <Route path="admin/users" element={<ManageUsersPage />} />
-                  <Route path="admin/committees" element={<ManageCommitteesPage />} />
-                  <Route path="admin/events/:eventId/settings" element={<EventSettingsPage />} />
+                  <Route
+                    path="admin/users"
+                    element={
+                      <ProtectedRoute requiredRoles={['executive_admin']}>
+                        <ManageUsersPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="admin/committees"
+                    element={
+                      <ProtectedRoute requiredRoles={['executive_admin']}>
+                        <ManageCommitteesPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="admin/events/:eventId/settings"
+                    element={
+                      <ProtectedRoute requiredRoles={['chair', 'secretary', 'executive_admin']}>
+                        <EventSettingsPage />
+                      </ProtectedRoute>
+                    }
+                  />
                   
                   {/* Legacy/Other Routes */}
                   <Route path="committees" element={<CommitteesPage />} />
                   <Route path="tasks" element={<TasksPage />} />
-                  <Route path="finance" element={<FinancePage />} />
+                  <Route
+                    path="finance"
+                    element={
+                      <ProtectedRoute requiredRoles={['chair', 'treasurer', 'finance_member', 'executive_admin']}>
+                        <FinancePage />
+                      </ProtectedRoute>
+                    }
+                  />
                   <Route path="providers" element={<ProvidersPage />} />
                   <Route path="reports" element={<ReportsPage />} />
                 </Route>

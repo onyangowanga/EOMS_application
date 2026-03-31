@@ -19,6 +19,7 @@ import {
   Alert,
   Skeleton,
   Stack,
+  MenuItem,
   useTheme,
   useMediaQuery,
   Divider,
@@ -85,6 +86,16 @@ const ClusterManagementPage: React.FC = () => {
     enabled: !!eventId,
   });
 
+  const { data: eventMembers = [] } = useQuery({
+    queryKey: ['event-members', eventId],
+    queryFn: () => eventService.getEventMembers(eventId!),
+    enabled: !!eventId,
+  });
+
+  const normalizedClusters: ClusterGroup[] = Array.isArray(clusters)
+    ? clusters
+    : ((clusters as any)?.results || []);
+
   // Create cluster mutation
   const createClusterMutation = useMutation({
     mutationFn: (data: any) => eventService.createCluster(data),
@@ -93,6 +104,18 @@ const ClusterManagementPage: React.FC = () => {
       handleCloseDialog();
     },
     onError: (error: any) => {
+      const data = error.response?.data;
+      if (typeof data === 'string') {
+        setFormError(data);
+        return;
+      }
+      if (data && typeof data === 'object') {
+        const firstFieldError = Object.values(data)[0];
+        if (Array.isArray(firstFieldError) && firstFieldError[0]) {
+          setFormError(String(firstFieldError[0]));
+          return;
+        }
+      }
       setFormError(error.response?.data?.message || 'Failed to create cluster');
     },
   });
@@ -116,7 +139,7 @@ const ClusterManagementPage: React.FC = () => {
     return stats;
   };
 
-  const stats = clusters ? calculateStats(clusters) : null;
+  const stats = calculateStats(normalizedClusters);
 
   // Handlers
   const handleOpenDialog = (cluster?: ClusterGroup) => {
@@ -125,7 +148,7 @@ const ClusterManagementPage: React.FC = () => {
       setFormData({
         name: cluster.name,
         target_amount: cluster.target_amount || '',
-        leader: cluster.leader,
+        leader: String(cluster.cluster_lead || cluster.leader || ''),
         description: cluster.description || '',
       });
     } else {
@@ -157,7 +180,7 @@ const ClusterManagementPage: React.FC = () => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: name === 'leader' ? (value ? parseInt(value, 10) : undefined) : value,
+      [name]: value,
     }));
   };
 
@@ -173,13 +196,19 @@ const ClusterManagementPage: React.FC = () => {
     }
 
     // Prepare data
-    const submitData = {
+    const submitData: any = {
       event: eventId!,
       name: formData.name.trim(),
       target_amount: formData.target_amount,
-      leader: formData.leader,
-      description: formData.description?.trim() || '',
     };
+    if (formData.leader && formData.leader.trim()) {
+      const leaderId = Number.parseInt(formData.leader, 10);
+      if (Number.isNaN(leaderId)) {
+        setFormError('Please select a valid cluster leader');
+        return;
+      }
+      submitData.cluster_lead = leaderId;
+    }
 
     createClusterMutation.mutate(submitData);
   };
@@ -323,9 +352,9 @@ const ClusterManagementPage: React.FC = () => {
       )}
 
       {/* Clusters Grid */}
-      {clusters && clusters.length > 0 ? (
+      {normalizedClusters.length > 0 ? (
         <Grid container spacing={2}>
-          {clusters.map((cluster) => {
+          {normalizedClusters.map((cluster) => {
             const progress = cluster.target_amount
               ? (parseFloat(cluster.collected_amount || '0') / parseFloat(cluster.target_amount)) * 100
               : 0;
@@ -352,10 +381,10 @@ const ClusterManagementPage: React.FC = () => {
                     </Typography>
 
                     {/* Leader Badge */}
-                    {cluster.leader && (
+                    {(cluster.cluster_lead_name || cluster.cluster_lead || cluster.leader) && (
                       <Chip 
                         icon={<PeopleIcon />} 
-                        label={`Leader ID: ${cluster.leader}`}
+                        label={`Leader: ${cluster.cluster_lead_name || `User #${cluster.cluster_lead || cluster.leader}`}`}
                         size="small"
                         sx={{ mb: 2 }}
                       />
@@ -441,7 +470,7 @@ const ClusterManagementPage: React.FC = () => {
                       <Button
                         size="small"
                         startIcon={<VisibilityIcon />}
-                        onClick={() => navigate(`/clusters/${cluster.id}`)}
+                        onClick={() => navigate(`/events/${eventId}/clusters/${cluster.id}/details`)}
                         fullWidth
                         sx={{ minHeight: 40 }} // Touch-friendly
                       >
@@ -530,14 +559,22 @@ const ClusterManagementPage: React.FC = () => {
 
             <TextField
               name="leader"
-              label="Cluster Leader (User ID)"
-              type="number"
+              label="Cluster Leader"
+              select
               value={formData.leader || ''}
               onChange={handleInputChange}
               fullWidth
-              placeholder="e.g., 5"
-              helperText="Optional: User ID of the cluster leader"
-            />
+              helperText="Optional: Select an event member as cluster leader"
+            >
+              <MenuItem value="">
+                <em>No leader selected</em>
+              </MenuItem>
+              {eventMembers.map((member) => (
+                <MenuItem key={member.id} value={String(member.user)}>
+                  {member.full_name} ({member.role_display})
+                </MenuItem>
+              ))}
+            </TextField>
 
             <TextField
               name="description"

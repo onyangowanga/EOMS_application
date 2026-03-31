@@ -18,21 +18,26 @@ import {
 import { Download as DownloadIcon } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import { reportService } from '../services/report.service';
-import { committeeService } from '../services/committee.service';
+import { eventService } from '../services/event.service';
+import { useParams } from 'react-router-dom';
 
 const ReportsPage: React.FC = () => {
+  const { eventId } = useParams<{ eventId: string }>();
   const [selectedCommittee, setSelectedCommittee] = useState<number | ''>('');
   const [currentTab, setCurrentTab] = useState(0);
 
   const { data: committees } = useQuery({
-    queryKey: ['committees'],
-    queryFn: committeeService.getAll,
+    queryKey: ['committees', eventId, 'reports'],
+    queryFn: () => eventService.getEventCommittees(eventId!),
+    enabled: !!eventId,
+    refetchInterval: 10000,
   });
 
   const { data: committeeReport, isLoading: reportLoading } = useQuery({
     queryKey: ['committee-report', selectedCommittee],
     queryFn: () => reportService.getCommitteeReport(selectedCommittee as number),
     enabled: !!selectedCommittee,
+    refetchInterval: 10000,
   });
 
   const formatCurrency = (amount: number | string) => {
@@ -68,7 +73,7 @@ const ReportsPage: React.FC = () => {
             label="Select Committee"
           >
             <MenuItem value="">All Committees</MenuItem>
-            {committees?.map((committee) => (
+            {committees?.map((committee: any) => (
               <MenuItem key={committee.id} value={committee.id}>
                 {committee.name}
               </MenuItem>

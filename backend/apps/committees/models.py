@@ -108,6 +108,11 @@ class Committee(models.Model):
 class CommitteeMember(models.Model):
     """CommitteeMember model for managing committee memberships"""
     
+    ROLE_CHOICES = [
+        ('TEAM_LEAD', 'Team Lead'),
+        ('MEMBER', 'Member'),
+    ]
+    
     committee = models.ForeignKey(
         Committee,
         on_delete=models.CASCADE,
@@ -118,7 +123,8 @@ class CommitteeMember(models.Model):
         on_delete=models.CASCADE,
         related_name='committee_memberships'
     )
-    is_lead = models.BooleanField(default=False)
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='MEMBER')
+    is_lead = models.BooleanField(default=False)  # Keep for backward compatibility
     role_description = models.CharField(max_length=255, blank=True)
     joined_at = models.DateTimeField(auto_now_add=True)
     
@@ -129,3 +135,9 @@ class CommitteeMember(models.Model):
     
     def __str__(self):
         return f"{self.user.full_name} - {self.committee.name}"
+    
+    def save(self, *args, **kwargs):
+        # Automatically set is_lead if role is TEAM_LEAD
+        if self.role == 'TEAM_LEAD':
+            self.is_lead = True
+        super().save(*args, **kwargs)

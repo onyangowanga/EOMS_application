@@ -11,8 +11,16 @@ from .serializers import (
     CommitteeSerializer, CommitteeCreateSerializer, CommitteeListSerializer,
     CommitteeMemberSerializer, AddMemberSerializer, CommitteeBudgetSerializer
 )
+from apps.events.models import BudgetItem
+from apps.events.serializers import BudgetItemSerializer, BudgetItemCreateSerializer
+from apps.users.rbac import resolve_user_roles
 
 User = get_user_model()
+
+
+def _can_manage_event_members(user, event_id):
+    roles = resolve_user_roles(user, event_id)
+    return bool(roles.intersection({'chair', 'secretary'}))
 
 
 class CommitteeViewSet(viewsets.ModelViewSet):
@@ -68,6 +76,8 @@ class CommitteeViewSet(viewsets.ModelViewSet):
     def add_member(self, request, pk=None):
         """Add a member to the committee"""
         committee = self.get_object()
+        if not _can_manage_event_members(request.user, committee.event_id):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
         serializer = AddMemberSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
@@ -100,6 +110,8 @@ class CommitteeViewSet(viewsets.ModelViewSet):
     def remove_member(self, request, pk=None):
         """Remove a member from the committee"""
         committee = self.get_object()
+        if not _can_manage_event_members(request.user, committee.event_id):
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
         user_id = request.data.get('user_id')
         
         try:
@@ -193,6 +205,36 @@ class CommitteeViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         
         return Response(serializer.data)
+    
+    @action(detail=True, methods=['get', 'post'])
+    def budget_items(self, request, pk=None):
+        """Get or create budget items for the committee"""
+        committee = self.get_object()
+        
+        if request.method == 'GET':
+            # Get all budget items for this committee
+            items = BudgetItem.objects.filter(committee=committee).select_related(
+                'created_by', 'approved_by'
+            ).order_by('-created_at')
+            serializer = BudgetItemSerializer(items, many=True)
+            return Response(serializer.data)
+        
+        elif request.method == 'POST':
+            # Create a new budget item
+            data = request.data.copy()
+            data['committee'] = committee.id
+            data['event'] = committee.event.id
+            data['created_by'] = request.user.id
+            
+            serializer = BudgetItemCreateSerializer(data=data)
+            if serializer.is_valid():
+                budget_item = serializer.save()
+                # Return full serializer with computed fields
+                return Response(
+                    BudgetItemSerializer(budget_item).data,
+                    status=status.HTTP_201_CREATED
+                )
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     @action(detail=False, methods=['get'])
     def by_event(self, request):

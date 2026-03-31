@@ -4,12 +4,6 @@ import {
   Paper,
   Typography,
   Button,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Chip,
   IconButton,
   Dialog,
@@ -26,7 +20,10 @@ import {
   Stepper,
   Step,
   StepLabel,
+  Stack,
+  useMediaQuery,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
   Add as AddIcon,
   Edit as EditIcon,
@@ -36,8 +33,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { providerService } from '../services/provider.service';
 import { committeeService } from '../services/committee.service';
 import type { ServiceProvider, ServiceProviderCreate } from '../types/index';
+import ResponsiveDataView from '../components/ResponsiveDataView';
 
 const ProvidersPage: React.FC = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const queryClient = useQueryClient();
   const [openDialog, setOpenDialog] = useState(false);
   const [filterType, setFilterType] = useState<string>('ALL');
@@ -138,20 +138,26 @@ const ProvidersPage: React.FC = () => {
 
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Service Providers</Typography>
+      <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={2} mb={3}>
+        <Box>
+          <Typography variant="h4">Service Providers</Typography>
+          <Typography variant="body1" color="text.secondary">
+            Vendor records stay dense and sortable on desktop while mobile shifts them into compact service cards.
+          </Typography>
+        </Box>
         <Button
           variant="contained"
           startIcon={<AddIcon />}
           onClick={() => setOpenDialog(true)}
+          fullWidth={isMobile}
         >
           Add Provider
         </Button>
-      </Box>
+      </Stack>
 
       {/* Filter */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <FormControl sx={{ minWidth: 200 }}>
+      <Paper sx={{ p: { xs: 2, md: 2.5 }, mb: 3, borderRadius: 5 }}>
+        <FormControl fullWidth sx={{ maxWidth: { md: 320 } }}>
           <InputLabel>Provider Type</InputLabel>
           <Select
             value={filterType}
@@ -171,67 +177,45 @@ const ProvidersPage: React.FC = () => {
         </FormControl>
       </Paper>
 
-      {/* Providers Table */}
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Provider Name</TableCell>
-              <TableCell>Type</TableCell>
-              <TableCell>Contact Person</TableCell>
-              <TableCell>Phone</TableCell>
-              <TableCell>Cost Estimate</TableCell>
-              <TableCell>Actual Cost</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Committee</TableCell>
-              <TableCell align="center">Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {filteredProviders && filteredProviders.length > 0 ? (
-              filteredProviders.map((provider: ServiceProvider) => (
-                <TableRow key={provider.id} hover>
-                  <TableCell>{provider.name}</TableCell>
-                  <TableCell>
-                    <Chip label={provider.provider_type} size="small" color="primary" />
-                  </TableCell>
-                  <TableCell>{provider.contact_person}</TableCell>
-                  <TableCell>{provider.phone}</TableCell>
-                  <TableCell>{provider.cost_estimate ? formatCurrency(provider.cost_estimate) : '-'}</TableCell>
-                  <TableCell>
-                    {provider.actual_cost ? formatCurrency(provider.actual_cost) : '-'}
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={provider.status}
-                      color={getStatusColor(provider.status)}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>{provider.committee.name}</TableCell>
-                  <TableCell align="center">
-                    <IconButton size="small" color="primary">
-                      <VisibilityIcon />
-                    </IconButton>
-                    <IconButton size="small" color="secondary">
-                      <EditIcon />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell colSpan={9} align="center">
-                  <Typography color="text.secondary">No providers found</Typography>
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
+      <ResponsiveDataView
+        data={filteredProviders || []}
+        getRowId={(provider) => provider.id}
+        emptyMessage="No providers found"
+        tableAriaLabel="Service providers"
+        columns={[
+          { key: 'name', label: 'Provider Name', render: (provider) => provider.name },
+          { key: 'type', label: 'Type', render: (provider) => <Chip label={provider.provider_type} size="small" color="primary" /> },
+          { key: 'contact', label: 'Contact Person', render: (provider) => provider.contact_person || '-' },
+          { key: 'phone', label: 'Phone', render: (provider) => provider.phone },
+          { key: 'estimate', label: 'Cost Estimate', render: (provider) => provider.cost_estimate ? formatCurrency(provider.cost_estimate) : '-', align: 'right' },
+          { key: 'actual', label: 'Actual Cost', render: (provider) => provider.actual_cost ? formatCurrency(provider.actual_cost) : '-', align: 'right' },
+          { key: 'status', label: 'Status', render: (provider) => <Chip label={provider.status} color={getStatusColor(provider.status)} size="small" /> },
+          { key: 'committee', label: 'Committee', render: (provider) => provider.committee.name },
+        ]}
+        mobileTitle={(provider) => provider.name}
+        mobileSubtitle={(provider) => provider.committee.name}
+        mobileFields={[
+          { label: 'Type', render: (provider) => <Chip label={provider.provider_type} size="small" color="primary" /> },
+          { label: 'Status', render: (provider) => <Chip label={provider.status} color={getStatusColor(provider.status)} size="small" /> },
+          { label: 'Contact', render: (provider) => provider.contact_person || '-' },
+          { label: 'Phone', render: (provider) => provider.phone },
+          { label: 'Estimate', render: (provider) => provider.cost_estimate ? formatCurrency(provider.cost_estimate) : '-' },
+          { label: 'Actual', render: (provider) => provider.actual_cost ? formatCurrency(provider.actual_cost) : '-' },
+        ]}
+        rowActions={() => (
+          <Box display="flex" justifyContent="flex-end" gap={0.5}>
+            <IconButton size="small" color="primary">
+              <VisibilityIcon />
+            </IconButton>
+            <IconButton size="small" color="secondary">
+              <EditIcon />
+            </IconButton>
+          </Box>
+        )}
+      />
 
       {/* Create Dialog */}
-      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>
+      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth fullScreen={isMobile}>
         <DialogTitle>Add Service Provider</DialogTitle>
         <DialogContent>
           {error && (

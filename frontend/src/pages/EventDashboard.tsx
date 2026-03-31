@@ -2,22 +2,20 @@ import React from 'react';
 import {
   Box,
   Grid,
-  Paper,
   Typography,
+  Stack,
+  Button,
   Card,
   CardContent,
   LinearProgress,
   Chip,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Alert,
   Skeleton,
   IconButton,
   Tooltip,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
 import {
   TrendingUp,
@@ -29,11 +27,14 @@ import {
   Event as EventIcon,
   LocationOn,
   Refresh,
+  ExpandMore,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { eventService } from '../services/event.service';
 import type {Event, CommitteePhase6, TaskPhase6 } from '../types';
+import { isTaskBasedCommittee } from '../utils/committeeModules';
+import { useAuth } from '../contexts/AuthContext';
 
 /**
  * Event Dashboard Component - Phase 7
@@ -48,6 +49,7 @@ import type {Event, CommitteePhase6, TaskPhase6 } from '../types';
 const EventDashboard: React.FC = () => {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
+  const { user, hasRole } = useAuth();
 
   // Validate eventId - prevent reserved words like "create" from being used as event IDs
   React.useEffect(() => {
@@ -76,6 +78,30 @@ const EventDashboard: React.FC = () => {
     refetchInterval: 60000, // Refresh every minute
   });
 
+  const { data: pendingBudgetApprovals = [] } = useQuery({
+    queryKey: ['budget-items', eventId, 'PENDING'],
+    queryFn: () => eventService.getEventBudgetItems(eventId!, 'PENDING'),
+    enabled: !!eventId,
+  });
+
+  const { data: expenses = [] } = useQuery({
+    queryKey: ['expenses', eventId, 'dashboard'],
+    queryFn: () => eventService.getEventExpenses(eventId!),
+    enabled: !!eventId,
+  });
+
+  const { data: clusterDeposits = [] } = useQuery({
+    queryKey: ['cluster-deposits', eventId, 'dashboard'],
+    queryFn: () => eventService.getClusterDeposits(eventId!),
+    enabled: !!eventId,
+  });
+
+  const { data: eventMembers = [] } = useQuery({
+    queryKey: ['event-members', eventId, 'dashboard'],
+    queryFn: () => eventService.getEventMembers(eventId!),
+    enabled: !!eventId,
+  });
+
   if (isLoading) {
     return <DashboardSkeleton />;
   }
@@ -90,6 +116,29 @@ const EventDashboard: React.FC = () => {
 
   const { event, financialSummary, eventProgress, committees, recentTasks, overdueTasks, clusters } =
     dashboardData;
+
+  const operationalCommittees = (committees || []).filter((committee: CommitteePhase6) => isTaskBasedCommittee(committee));
+  const normalizedExpenses: any[] = Array.isArray(expenses) ? expenses : ((expenses as any)?.results || []);
+  const normalizedDeposits: any[] = Array.isArray(clusterDeposits) ? clusterDeposits : ((clusterDeposits as any)?.results || []);
+  const clusterDepositsTotal = normalizedDeposits.reduce(
+    (sum: number, d: any) => sum + parseFloat(d.amount || '0'), 0
+  );
+  const trueCollectionsTotal = parseFloat(financialSummary?.collections?.total || '0') + clusterDepositsTotal;
+  const totalBudget = parseFloat((event as any).total_budget || '0');
+  const currentEventRole = (eventMembers as any[]).find((member: any) => member.user_details?.id === user?.id)?.role;
+
+  const pendingRequisitions = normalizedExpenses.filter((expense: any) =>
+    ['PENDING', 'APPROVED_CHAIR', 'APPROVED_TREASURER'].includes(expense.status)
+  );
+  const pendingPayments = normalizedExpenses.filter((expense: any) => expense.status === 'FULLY_APPROVED');
+  const pendingClusterSubmissions = normalizedDeposits.filter((deposit: any) => !deposit.confirmed_by_treasurer);
+  const atRiskCommittees = operationalCommittees.filter((committee: CommitteePhase6) =>
+    parseFloat((committee.operational_progress as string) || '0') < 50
+  );
+
+  const isAdmin = hasRole('executive_admin');
+  const isFinance = hasRole(['finance_member', 'treasurer']);
+  const isExecutive = hasRole(['chair', 'treasurer', 'secretary', 'executive_admin']);
 
   return (
     <Box>
@@ -119,10 +168,10 @@ const EventDashboard: React.FC = () => {
             <Grid item xs={12} sm={6} md={3}>
               <StatsCard
                 title="Total Collections"
-                value={`KSH ${parseFloat(financialSummary.collections.total || '0').toLocaleString()}`}
+                value={`KSH ${trueCollectionsTotal.toLocaleString()}`}
                 icon={<AttachMoney />}
                 color="#2e7d32"
-                subtitle={`Cluster: KSH ${parseFloat(financialSummary.collections.cluster || '0').toLocaleString()}`}
+                subtitle={`General: KSH ${parseFloat(financialSummary.collections.general || '0').toLocaleString()} | Cluster: KSH ${clusterDepositsTotal.toLocaleString()}`}
               />
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
@@ -145,55 +194,19 @@ const EventDashboard: React.FC = () => {
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
               <StatsCard
-                title="Pending Approvals"
-                value={financialSummary.expenses.awaiting_approval}
-                icon={<Warning />}
-                color="#ed6c02"
-                subtitle={`Fully Approved: ${financialSummary.expenses.fully_approved}`}
+                title="Total Budget"
+                value={`KSH ${totalBudget.toLocaleString()}`}
+                icon={<AttachMoney />}
+                color="#1565c0"
+                subtitle={`Spent: KSH ${parseFloat(financialSummary.expenses.total || '0').toLocaleString()}`}
               />
             </Grid>
           </>
         )}
 
-        {/* Operational Stats */}
+        {/* Keep only Committee Members card in second row */}
         {eventProgress && (
           <>
-            <Grid item xs={12} sm={6} md={3}>
-              <StatsCard
-                title="Total Tasks"
-                value={eventProgress.total_tasks}
-                icon={<Assignment />}
-                color="#1976d2"
-                subtitle={`Completed: ${eventProgress.completed_tasks}`}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <StatsCard
-                title="Completion Rate"
-                value={`${parseFloat(eventProgress.completion_rate).toFixed(0)}%`}
-                icon={<CheckCircle />}
-                color="#9c27b0"
-                subtitle={`Avg Progress: ${parseFloat(eventProgress.average_progress).toFixed(0)}%`}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <StatsCard
-                title="Committees"
-                value={committees.length}
-                icon={<People />}
-                color="#0288d1"
-                subtitle={`With ${eventProgress.total_tasks} tasks`}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <StatsCard
-                title="Clusters"
-                value={clusters.length}
-                icon={<People />}
-                color="#7b1fa2"
-                subtitle="Fund mobilization groups"
-              />
-            </Grid>
             <Grid item xs={12} sm={6} md={3}>
               <Card
                 sx={{
@@ -230,206 +243,221 @@ const EventDashboard: React.FC = () => {
         )}
       </Grid>
 
-      {/* Progress Overview */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        {/* Financial Progress */}
-        {event.financial_progress && (
-          <Grid item xs={12} md={6}>
-            <Paper sx={{ p: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Financial Progress
-              </Typography>
-              <Box sx={{ mb: 2 }}>
-                <LinearProgress
-                  variant="determinate"
-                  value={parseFloat(event.financial_progress)}
-                  sx={{ height: 10, borderRadius: 5 }}
-                  color={parseFloat(event.financial_progress) >= 75 ? 'success' : 'primary'}
-                />
-              </Box>
-              <Typography variant="body2" color="text.secondary">
-                {parseFloat(event.financial_progress).toFixed(1)}% of financial targets met
-              </Typography>
-            </Paper>
-          </Grid>
-        )}
-
-        {/* Operational Progress */}
-        {event.operational_progress && (
-          <Grid item xs={12} md={6}>
-            <Paper sx={{ p: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Operational Progress
-              </Typography>
-              <Box sx={{ mb: 2 }}>
-                <LinearProgress
-                  variant="determinate"
-                  value={parseFloat(event.operational_progress)}
-                  sx={{ height: 10, borderRadius: 5 }}
-                  color={parseFloat(event.operational_progress) >= 75 ? 'success' : 'primary'}
-                />
-              </Box>
-              <Typography variant="body2" color="text.secondary">
-                {parseFloat(event.operational_progress).toFixed(1)}% of tasks completed
-              </Typography>
-            </Paper>
-          </Grid>
-        )}
-      </Grid>
-
-      {/* Committees & Recent Tasks */}
-      <Grid container spacing={3}>
-        {/* Committees Summary */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: { xs: 2, sm: 3 } }}>
-            <Typography variant="h6" gutterBottom sx={{ fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
-              Committees Overview
-            </Typography>
-            <TableContainer sx={{ overflowX: 'auto' }}>
-              <Table size="small" sx={{ minWidth: { xs: 400, sm: 'auto' } }}>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Committee</TableCell>
-                    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Lead</TableCell>
-                    <TableCell align="right">Tasks</TableCell>
-                    <TableCell align="right" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Progress</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {committees.slice(0, 5).map((committee: CommitteePhase6) => (
-                    <TableRow
-                      key={committee.id}
-                      hover
-                      sx={{ cursor: 'pointer' }}
-                      onClick={() => navigate(`/committees/${committee.id}`)}
-                    >
-                      <TableCell>
-                        <Box>
-                          <Typography variant="body2" fontWeight="medium">
-                            {committee.committee_type_display}
-                          </Typography>
-                          {/* Mobile: Show lead below committee name */}
-                          <Typography 
-                            variant="caption" 
-                            color="text.secondary"
-                            sx={{ display: { xs: 'block', sm: 'none' } }}
-                          >
-                            {committee.lead_name}
-                          </Typography>
-                        </Box>
-                        {committee.is_main && (
-                          <Chip label="Main" size="small" color="primary" sx={{ ml: 1, fontSize: '0.65rem' }} />
-                        )}
-                      </TableCell>
-                      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
-                        <Typography variant="body2" color="text.secondary">
-                          {committee.lead_name}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="right">
-                        <Typography variant="body2">
-                          {committee.tasks_completed}/{committee.task_count}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="right" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
-                        <Typography variant="body2">
-                          {committee.operational_progress
-                            ? `${parseFloat(committee.operational_progress).toFixed(0)}%`
-                            : 'N/A'}
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-            {committees.length > 5 && (
-              <Typography
-                variant="body2"
-                color="primary"
-                sx={{ mt: 2, cursor: 'pointer' }}
-                onClick={() => navigate('/committees')}
-              >
-                View all {committees.length} committees →
-              </Typography>
+      <Accordion sx={{ mb: 2 }}>
+        <AccordionSummary expandIcon={<ExpandMore />}>
+          <Typography variant="h6">Quick Actions</Typography>
+        </AccordionSummary>
+        <AccordionDetails sx={{ pt: 0 }}>
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+            <Button size="small" variant="contained" onClick={() => navigate(`/events/${eventId}/dashboard`)}>
+              Dashboard
+            </Button>
+            <Button size="small" variant="outlined" onClick={() => navigate(`/events/${eventId}/subcommittees`)}>
+              Subcommittees
+            </Button>
+            <Button size="small" variant="outlined" onClick={() => navigate(`/events/${eventId}/clusters`)}>
+              Clusters
+            </Button>
+            <Button size="small" variant="outlined" onClick={() => navigate(`/events/${eventId}/approvals`)}>
+              Approvals Center
+            </Button>
+            {(isFinance || isExecutive || isAdmin) && (
+              <Button size="small" variant="outlined" onClick={() => navigate(`/events/${eventId}/budget`)}>
+                Finance Module
+              </Button>
             )}
-          </Paper>
-        </Grid>
+            {(isExecutive || isAdmin) && (
+              <Button size="small" variant="outlined" onClick={() => navigate(`/events/${eventId}/subcommittees/create`)}>
+                Create Subcommittee
+              </Button>
+            )}
+            {(isExecutive || isAdmin) && (
+              <Button size="small" variant="outlined" onClick={() => navigate(`/events/${eventId}/committee-members`)}>
+                Add Committee Member
+              </Button>
+            )}
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
 
-        {/* Recent Tasks */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: { xs: 2, sm: 3 } }}>
-            <Typography variant="h6" gutterBottom sx={{ fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
-              Recent Tasks
-            </Typography>
-            <TableContainer sx={{ overflowX: 'auto' }}>
-              <Table size="small" sx={{ minWidth: { xs: 350, sm: 'auto' } }}>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Task</TableCell>
-                    <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Status</TableCell>
-                    <TableCell align="right">Progress</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {recentTasks.map((task: TaskPhase6) => (
-                    <TableRow
-                      key={task.id}
-                      hover
-                      sx={{ cursor: 'pointer' }}
-                      onClick={() => navigate(`/tasks/${task.id}`)}
-                    >
-                      <TableCell>
-                        <Box>
-                          <Typography variant="body2" fontWeight="medium">
-                            {task.title}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {task.assigned_to_name || 'Unassigned'}
-                          </Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
-                        <Chip
-                          label={task.status_display}
-                          size="small"
-                          color={getTaskStatusColor(task.status)}
-                        />
-                      </TableCell>
-                      <TableCell align="right">
-                        <Box>
-                          <Typography variant="body2">
-                            {parseFloat(task.progress_percentage).toFixed(0)}%
-                          </Typography>
-                          {/* Mobile: Show status chip below progress */}
-                          <Box sx={{ display: { xs: 'block', sm: 'none' }, mt: 0.5 }}>
-                            <Chip
-                              label={task.status_display}
-                              size="small"
-                              color={getTaskStatusColor(task.status)}
-                              sx={{ fontSize: '0.65rem' }}
-                            />
-                          </Box>
-                        </Box>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-            {eventProgress && eventProgress.total_tasks > 5 && (
-              <Typography
-                variant="body2"
-                color="primary"
-                sx={{ mt: 2, cursor: 'pointer' }}
+      <Accordion sx={{ mb: 2 }}>
+        <AccordionSummary expandIcon={<ExpandMore />}>
+          <Typography variant="h6">Subcommittee Overview</Typography>
+        </AccordionSummary>
+        <AccordionDetails sx={{ pt: 0 }}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+            <Box />
+            <Button size="small" onClick={() => navigate(`/events/${eventId}/subcommittees`)}>
+              View All
+            </Button>
+          </Stack>
+          <Grid container spacing={2}>
+            {operationalCommittees.slice(0, 6).map((committee: CommitteePhase6) => {
+              const progress = parseFloat((committee.operational_progress as string) || '0');
+              const statusLabel = progress >= 75 ? 'On track' : progress >= 50 ? 'Watch' : 'At risk';
+              const statusColor = progress >= 75 ? 'success' : progress >= 50 ? 'warning' : 'error';
+
+              return (
+                <Grid item xs={12} sm={6} md={4} key={committee.id}>
+                  <Card sx={{ cursor: 'pointer', height: '100%' }} onClick={() => navigate(`/events/${eventId}/subcommittees/${committee.id}`)}>
+                    <CardContent>
+                      <Stack spacing={1}>
+                        <Typography variant="subtitle1" fontWeight="bold">{committee.name}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Lead: {committee.lead_name || 'Unassigned'}
+                        </Typography>
+                        <LinearProgress variant="determinate" value={Math.min(progress, 100)} sx={{ height: 8, borderRadius: 4 }} />
+                        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                          <Chip size="small" label={`${progress.toFixed(0)}%`} />
+                          <Chip size="small" label={`${committee.task_count || 0} tasks`} variant="outlined" />
+                          <Chip size="small" label={statusLabel} color={statusColor as any} />
+                        </Stack>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              );
+            })}
+          </Grid>
+        </AccordionDetails>
+      </Accordion>
+
+      {financialSummary && (
+        <Accordion sx={{ mb: 2 }}>
+          <AccordionSummary expandIcon={<ExpandMore />}>
+            <Typography variant="h6">Finance Summary Preview</Typography>
+          </AccordionSummary>
+          <AccordionDetails sx={{ pt: 0 }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="flex-end" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={1} sx={{ mb: 2 }}>
+              <Button size="small" variant="outlined" onClick={() => navigate(`/events/${eventId}/budget`)}>
+                Open Finance Module
+              </Button>
+            </Stack>
+            <Grid container spacing={2}>
+              <Grid item xs={6} md={2.4}>
+                <StatsCard title="Estimated Budget" value={`KSH ${trueCollectionsTotal.toLocaleString()}`} icon={<AttachMoney />} color="#1976d2" />
+              </Grid>
+              <Grid item xs={6} md={2.4}>
+                <StatsCard title="Approved Budget" value={`KSH ${parseFloat(financialSummary.expenses.fully_approved || '0').toLocaleString()}`} icon={<CheckCircle />} color="#2e7d32" />
+              </Grid>
+              <Grid item xs={6} md={2.4}>
+                <StatsCard title="Pending Budget" value={pendingBudgetApprovals.length} icon={<Warning />} color="#ed6c02" />
+              </Grid>
+              <Grid item xs={6} md={2.4}>
+                <StatsCard title="Used Budget" value={`KSH ${parseFloat(financialSummary.expenses.paid || '0').toLocaleString()}`} icon={<TrendingUp />} color="#d32f2f" />
+              </Grid>
+              <Grid item xs={12} md={2.4}>
+                <StatsCard title="Remaining" value={`KSH ${parseFloat(financialSummary.balance || '0').toLocaleString()}`} icon={<AttachMoney />} color="#0288d1" />
+              </Grid>
+            </Grid>
+          </AccordionDetails>
+        </Accordion>
+      )}
+
+      <Accordion sx={{ mb: 2 }}>
+        <AccordionSummary expandIcon={<ExpandMore />}>
+          <Typography variant="h6">Cluster Mobilisation Summary</Typography>
+        </AccordionSummary>
+        <AccordionDetails sx={{ pt: 0 }}>
+          <Stack direction="row" justifyContent="flex-end" alignItems="center" sx={{ mb: 2 }}>
+            <Button size="small" onClick={() => navigate(`/events/${eventId}/clusters`)}>
+              Open Mobilisation Module
+            </Button>
+          </Stack>
+          <Grid container spacing={2}>
+            {(clusters || []).slice(0, 4).map((cluster: any) => (
+              <Grid item xs={12} sm={6} md={3} key={cluster.id}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="subtitle2" fontWeight="bold">{cluster.name}</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Target: KSH {parseFloat(cluster.target_amount || '0').toLocaleString()}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      Collected: KSH {parseFloat(cluster.collected_amount || '0').toLocaleString()}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                      Pledged: KSH {parseFloat(cluster.pledged_amount || '0').toLocaleString()}
+                    </Typography>
+                    <LinearProgress
+                      variant="determinate"
+                      value={Math.min(parseFloat(cluster.progress_percentage || '0'), 100)}
+                      sx={{ height: 8, borderRadius: 4 }}
+                    />
+                    <Typography variant="caption" color="text.secondary">
+                      {parseFloat(cluster.progress_percentage || '0').toFixed(1)}%
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+        </AccordionDetails>
+      </Accordion>
+
+      <Accordion sx={{ mb: 2 }}>
+        <AccordionSummary expandIcon={<ExpandMore />}>
+          <Typography variant="h6">Approvals & Alerts</Typography>
+        </AccordionSummary>
+        <AccordionDetails sx={{ pt: 0 }}>
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={6}>
+              <Card variant="outlined">
+                <CardContent>
+                  <Typography variant="subtitle2" gutterBottom>Pending Approvals</Typography>
+                  <Stack spacing={1}>
+                    <Chip label={`Budget items: ${pendingBudgetApprovals.length}`} size="small" color="warning" />
+                    <Chip label={`Requisitions: ${pendingRequisitions.length}`} size="small" color="warning" />
+                    <Chip label={`Payments: ${pendingPayments.length}`} size="small" color="warning" />
+                    <Chip label={`Cluster submissions: ${pendingClusterSubmissions.length}`} size="small" color="warning" />
+                  </Stack>
+                  <Button sx={{ mt: 2 }} size="small" onClick={() => navigate(`/events/${eventId}/approvals`)}>
+                    Open Approval Center
+                  </Button>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Card variant="outlined">
+                <CardContent>
+                  <Typography variant="subtitle2" gutterBottom>Active Alerts</Typography>
+                  <Stack spacing={1}>
+                    <Chip label={`Overdue tasks: ${overdueTasks?.length || 0}`} size="small" color={(overdueTasks?.length || 0) > 0 ? 'error' : 'default'} />
+                    <Chip label={`Committees at risk: ${atRiskCommittees.length}`} size="small" color={atRiskCommittees.length > 0 ? 'warning' : 'default'} />
+                    <Chip
+                      label={`Unsubmitted cluster funds: ${pendingClusterSubmissions.reduce((sum: number, item: any) => sum + parseFloat(item.amount || '0'), 0).toLocaleString()}`}
+                      size="small"
+                      color={pendingClusterSubmissions.length > 0 ? 'warning' : 'default'}
+                    />
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+        </AccordionDetails>
+      </Accordion>
+
+      <Accordion>
+        <AccordionSummary expandIcon={<ExpandMore />}>
+          <Typography variant="h6">Timeline & Milestones</Typography>
+        </AccordionSummary>
+        <AccordionDetails sx={{ pt: 0 }}>
+          <Stack spacing={1.5}>
+            <Chip label={`Event created: ${new Date(event.created_at).toLocaleDateString()}`} variant="outlined" />
+            <Chip label={`Event date: ${new Date(event.event_date).toLocaleDateString()}`} color="primary" />
+            <Chip label={`Operational progress milestone: ${parseFloat(event.operational_progress || '0').toFixed(1)}%`} variant="outlined" />
+            <Chip label={`Financial progress milestone: ${parseFloat(event.financial_progress || '0').toFixed(1)}%`} variant="outlined" />
+            {recentTasks.slice(0, 3).map((task: TaskPhase6) => (
+              <Chip
+                key={task.id}
+                label={`Task update: ${task.title} (${task.status_display})`}
+                variant="outlined"
                 onClick={() => navigate('/tasks')}
-              >
-                View all {eventProgress.total_tasks} tasks →
-              </Typography>
-            )}
-          </Paper>
-        </Grid>
-      </Grid>
+              />
+            ))}
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
     </Box>
   );
 };
@@ -501,18 +529,18 @@ const StatsCard: React.FC<{
   subtitle?: string;
 }> = ({ title, value, icon, color, subtitle }) => {
   return (
-    <Card>
-      <CardContent>
+    <Card sx={{ height: '100%' }}>
+      <CardContent sx={{ minHeight: 116 }}>
         <Box display="flex" alignItems="center" justifyContent="space-between">
-          <Box>
+          <Box sx={{ minWidth: 0 }}>
             <Typography color="text.secondary" variant="body2" gutterBottom>
               {title}
             </Typography>
-            <Typography variant="h5" fontWeight="bold">
+            <Typography variant="h6" fontWeight="bold" sx={{ fontSize: { xs: '1.05rem', sm: '1.2rem' }, lineHeight: 1.2 }}>
               {value}
             </Typography>
             {subtitle && (
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
                 {subtitle}
               </Typography>
             )}
@@ -568,16 +596,6 @@ function getStatusColor(status: string): 'default' | 'primary' | 'success' | 'er
     ACTIVE: 'primary',
     COMPLETED: 'success',
     CANCELLED: 'error',
-  };
-  return colorMap[status] || 'default';
-}
-
-function getTaskStatusColor(status: string): 'default' | 'primary' | 'warning' | 'success' {
-  const colorMap: { [key: string]: 'default' | 'primary' | 'warning' | 'success' } = {
-    TODO: 'default',
-    IN_PROGRESS: 'primary',
-    COMPLETED: 'success',
-    CANCELLED: 'warning',
   };
   return colorMap[status] || 'default';
 }

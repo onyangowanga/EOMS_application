@@ -17,6 +17,10 @@ import {
   TableRow,
   Chip,
   IconButton,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import { Add, Visibility } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -31,6 +35,7 @@ const CommitteesPage: React.FC = () => {
     description: '',
     event_type: '',
     event_date: '',
+    committee_type: 'OTHER',
   });
 
   const navigate = useNavigate();
@@ -46,7 +51,7 @@ const CommitteesPage: React.FC = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['committees'] });
       setOpen(false);
-      setFormData({ name: '', description: '', event_type: '', event_date: '' });
+      setFormData({ name: '', description: '', event_type: '', event_date: '', committee_type: 'OTHER' });
     },
   });
 
@@ -120,7 +125,17 @@ const CommitteesPage: React.FC = () => {
                   </TableCell>
                   <TableCell align="right">
                     <IconButton
-                      onClick={() => navigate(`/committees/${committee.id}`)}
+                      onClick={() => {
+                        // Check if committee has event field (Phase 6 structure)
+                        const eventId = (committee as any).event;
+                        if (eventId) {
+                          navigate(`/events/${eventId}/subcommittees/${committee.id}`);
+                        } else {
+                          // Fallback for old structure - might not work
+                          console.warn('Committee missing event field:', committee);
+                          navigate(`/committees/${committee.id}`);
+                        }
+                      }}
                       size="small"
                     >
                       <Visibility />
@@ -180,6 +195,25 @@ const CommitteesPage: React.FC = () => {
               InputLabelProps={{ shrink: true }}
               required
             />
+            <FormControl fullWidth margin="normal">
+              <InputLabel>Committee Type</InputLabel>
+              <Select
+                value={formData.committee_type}
+                label="Committee Type"
+                onChange={(e) => setFormData({ ...formData, committee_type: e.target.value })}
+              >
+                <MenuItem value="MAIN">Main Committee</MenuItem>
+                <MenuItem value="BUDGET_FINANCE">Budget & Finance</MenuItem>
+                <MenuItem value="FUNDS_MOBILIZATION">Funds Mobilization</MenuItem>
+                <MenuItem value="LOGISTICS">Logistics</MenuItem>
+                <MenuItem value="CATERING">Catering</MenuItem>
+                <MenuItem value="VENUE">Venue</MenuItem>
+                <MenuItem value="TRANSPORT">Transport</MenuItem>
+                <MenuItem value="MEDIA">Media & Communications</MenuItem>
+                <MenuItem value="SECURITY">Security</MenuItem>
+                <MenuItem value="OTHER">Other</MenuItem>
+              </Select>
+            </FormControl>
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setOpen(false)}>Cancel</Button>

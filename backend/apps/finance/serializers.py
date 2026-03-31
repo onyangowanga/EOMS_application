@@ -163,6 +163,13 @@ class ExpenseCreateSerializer(serializers.ModelSerializer):
         ]
     
     def validate(self, data):
+        budget_item = data.get('budget_item')
+
+        if not budget_item:
+            raise serializers.ValidationError({
+                'budget_item': 'A requisition must be tied to a budget item.'
+            })
+
         # If budget_item is specified, check if there's enough budget
         budget_item = data.get('budget_item')
         if budget_item:

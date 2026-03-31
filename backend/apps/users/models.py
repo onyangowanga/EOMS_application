@@ -46,6 +46,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     phone = models.CharField(max_length=15, unique=True)
     email = models.EmailField(blank=True, null=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='MEMBER')
+    roles = models.JSONField(default=list, blank=True)
     
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
@@ -65,6 +66,21 @@ class User(AbstractBaseUser, PermissionsMixin):
     
     def __str__(self):
         return f"{self.full_name} ({self.phone})"
+
+    @property
+    def effective_roles(self):
+        """Return explicit RBAC roles with fallback from legacy role."""
+        role_map = {
+            'ADMIN': ['executive_admin'],
+            'FINANCE': ['finance_member'],
+            'LEADER': ['chair'],
+            'MEMBER': ['committee_member'],
+            'STAKEHOLDER': ['committee_member'],
+        }
+
+        explicit = self.roles or []
+        mapped = role_map.get(self.role, [])
+        return list(dict.fromkeys([*explicit, *mapped]))
 
 
 class OTP(models.Model):
