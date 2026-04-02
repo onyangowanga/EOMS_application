@@ -27,14 +27,16 @@ const withReportDates = (startDate?: string, endDate?: string) => ({
 const normalizeSummaryReport = (eventId: string, raw: any): SummaryReportData => {
   const tasksCompleted = raw?.kpis?.tasks_completed;
   const fundsCollected = raw?.kpis?.funds_collected;
+  const fundsSpent = raw?.kpis?.funds_spent;
   const overallProgress = raw?.kpis?.event_progress;
   const totalFundsCollected = toNumber(fundsCollected?.value);
+  const totalFundsSpent = toNumber(fundsSpent?.value);
   const totalBudgetEstimate = toNumber(fundsCollected?.total);
   const remaining = Math.max(totalBudgetEstimate - totalFundsCollected, 0);
 
   return {
     event_id: String(eventId),
-    event_name: raw?.event_details?.name ?? 'Event',
+    event_name: raw?.event_name ?? raw?.event_details?.name ?? `Event ${eventId}`,
     report_date: new Date().toISOString(),
     kpis: {
       operational_progress: {
@@ -56,7 +58,7 @@ const normalizeSummaryReport = (eventId: string, raw: any): SummaryReportData =>
       },
       total_funds_spent: {
         label: 'Total Funds Spent',
-        value: 0,
+        value: totalFundsSpent,
         color: 'warning',
       },
       total_budget_estimate: {
@@ -76,14 +78,20 @@ const normalizeSummaryReport = (eventId: string, raw: any): SummaryReportData =>
       },
       mobilization_progress: {
         label: 'Mobilization Progress',
-        value: toNumber(fundsCollected?.percentage),
+        value: toNumber(raw?.kpis?.mobilization_progress?.value),
         unit: '%',
-        color: 'primary',
+        color: 'info',
       },
     },
     charts: {
-      daily_collections: [],
-      subcommittee_progress: [],
+      daily_collections: (raw?.daily_collections ?? []).map((item: any) => ({
+        label: item.label,
+        value: toNumber(item.value),
+      })),
+      subcommittee_progress: (raw?.subcommittee_progress ?? []).map((item: any) => ({
+        label: item.label,
+        value: toNumber(item.value),
+      })),
       expense_distribution: raw?.task_status_chart ?? [],
     },
     tables: {
@@ -94,9 +102,26 @@ const normalizeSummaryReport = (eventId: string, raw: any): SummaryReportData =>
         progress_percentage: task.status === 'COMPLETED' ? 100 : 0,
         is_overdue: toNumber(task.days_remaining) < 0,
       })),
-      largest_expenses: [],
-      latest_contributions: [],
-      pending_approvals: [],
+      largest_expenses: (raw?.largest_expenses ?? []).map((entry: any) => ({
+        id: String(entry.id),
+        budget_item: entry.budget_item || 'General',
+        subcommittee: entry.subcommittee || '-',
+        amount_approved: String(entry.amount_approved ?? '0'),
+        amount_paid: String(entry.amount_paid ?? '0'),
+        date_paid: entry.date_paid || '',
+        status: entry.status || 'PENDING',
+        notes: entry.notes || '',
+      })),
+      latest_contributions: (raw?.latest_contributions ?? []).map((entry: any) => ({
+        id: String(entry.id),
+        source: entry.source || 'Unknown',
+        cluster: entry.cluster || '',
+        amount: String(entry.amount ?? '0'),
+        date: entry.date || '',
+        type: entry.type || 'ACTUAL',
+        submission_status: entry.submission_status || 'PENDING',
+      })),
+      pending_approvals: raw?.pending_approvals ?? [],
     },
   };
 };
@@ -108,7 +133,7 @@ const normalizeOperationsReport = (eventId: string, raw: any): OperationsReportD
     return {
       ...committee,
       id: String(committee.id),
-      blocked_tasks: 0,
+      blocked_tasks: toNumber(committee.blocked_count),
       overdue_tasks: toNumber(committee.overdue_count),
       progress_percentage: progress,
       status,
@@ -127,7 +152,7 @@ const normalizeOperationsReport = (eventId: string, raw: any): OperationsReportD
 
   return {
     event_id: String(eventId),
-    event_name: 'Event',
+    event_name: raw?.event_name ?? `Event ${eventId}`,
     report_date: new Date().toISOString(),
     subcommittee_performance: subcommitteePerformance,
     task_breakdown: taskBreakdown,
@@ -158,12 +183,12 @@ const normalizeFinanceReport = (eventId: string, raw: any): FinanceReportData =>
 
   return {
     event_id: String(eventId),
-    event_name: 'Event',
+    event_name: raw?.event_name ?? `Event ${eventId}`,
     report_date: new Date().toISOString(),
     budget_overview: {
       total_estimated_budget: String(totalBudget),
       approved_budget: String(totalBudget),
-      pending_budget_items_count: 0,
+      pending_budget_items_count: toNumber(summary.pending_budget_items_count),
       pending_budget_items_amount: '0',
       used_budget_paid: String(expense),
       remaining_budget: String(Math.max(totalBudget - expense, 0)),
@@ -221,7 +246,7 @@ const normalizeClusterReport = (eventId: string, raw: any): ClusterReportData =>
 
   return {
     event_id: String(eventId),
-    event_name: 'Event',
+    event_name: raw?.event_name ?? `Event ${eventId}`,
     report_date: new Date().toISOString(),
     cluster_overview: clusterOverview,
     collection_ledger: (raw?.collection_ledger ?? []).map((entry: any) => ({
@@ -231,7 +256,7 @@ const normalizeClusterReport = (eventId: string, raw: any): ClusterReportData =>
       mode: entry.payment_channel === 'BANK' ? 'BANK_TRANSFER' : entry.payment_channel === 'MPESA' ? 'MOBILE_MONEY' : 'CASH',
       date: toDateOnly(entry.date),
       is_pledge: false,
-      submission_status: 'SUBMITTED',
+      submission_status: entry.submission_status ?? 'PENDING',
       cluster: entry.cluster_name ?? '',
     })),
     charts: {
@@ -249,17 +274,17 @@ const normalizeClusterReport = (eventId: string, raw: any): ClusterReportData =>
 
 const normalizeMemberReport = (eventId: string, raw: any): MemberReportData => ({
   event_id: String(eventId),
-  event_name: 'Event',
+  event_name: raw?.event_name ?? `Event ${eventId}`,
   report_date: new Date().toISOString(),
   member_activity: (raw?.members ?? []).map((member: any) => ({
     id: String(member.id),
     name: member.full_name,
     role: member.role,
-    subcommittees_assigned: [],
+    subcommittees_assigned: member.subcommittees_assigned ?? [],
     tasks_assigned: toNumber(member.tasks_assigned),
     tasks_completed: toNumber(member.tasks_completed),
     completion_rate_percentage: toNumber(member.completion_rate),
-    cluster_role: 'NONE',
+    cluster_role: member.cluster_role ?? 'NONE',
     last_activity_date: toDateOnly(member.joined_at),
   })),
   charts: {

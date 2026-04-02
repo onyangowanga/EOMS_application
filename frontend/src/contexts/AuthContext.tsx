@@ -9,7 +9,8 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (identifier: string, deliveryMethod: 'sms' | 'email') => Promise<void>;
-  verifyOTP: (identifier: string, otpCode: string) => Promise<void>;
+  loginWithPassword: (identifier: string, password: string) => Promise<void>;
+  verifyOTP: (identifier: string, otpCode: string) => Promise<User>;
   logout: () => void;
   updateUser: (user: User) => void;
   userRoles: RBACRole[];
@@ -46,9 +47,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     await authService.login({ identifier, delivery_method: deliveryMethod });
   };
 
+  const loginWithPassword = async (identifier: string, password: string) => {
+    const response = await authService.loginWithPassword({ identifier, password });
+    setUser(response.user);
+  };
+
   const verifyOTP = async (identifier: string, otpCode: string) => {
     const response = await authService.verifyOTP({ identifier, otp_code: otpCode });
     setUser(response.user);
+    return response.user;
   };
 
   const logout = () => {
@@ -71,6 +78,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     isAuthenticated: !!user,
     isLoading,
     login,
+    loginWithPassword,
     verifyOTP,
     logout,
     updateUser,

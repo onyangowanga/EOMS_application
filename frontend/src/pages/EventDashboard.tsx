@@ -20,7 +20,6 @@ import {
 import {
   TrendingUp,
   People,
-  Assignment,
   AttachMoney,
   Warning,
   CheckCircle,
@@ -49,7 +48,7 @@ import { useAuth } from '../contexts/AuthContext';
 const EventDashboard: React.FC = () => {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
-  const { user, hasRole } = useAuth();
+  const { hasRole } = useAuth();
 
   // Validate eventId - prevent reserved words like "create" from being used as event IDs
   React.useEffect(() => {
@@ -96,12 +95,6 @@ const EventDashboard: React.FC = () => {
     enabled: !!eventId,
   });
 
-  const { data: eventMembers = [] } = useQuery({
-    queryKey: ['event-members', eventId, 'dashboard'],
-    queryFn: () => eventService.getEventMembers(eventId!),
-    enabled: !!eventId,
-  });
-
   if (isLoading) {
     return <DashboardSkeleton />;
   }
@@ -125,8 +118,9 @@ const EventDashboard: React.FC = () => {
   );
   const trueCollectionsTotal = parseFloat(financialSummary?.collections?.total || '0') + clusterDepositsTotal;
   const totalBudget = parseFloat((event as any).total_budget || '0');
-  const currentEventRole = (eventMembers as any[]).find((member: any) => member.user_details?.id === user?.id)?.role;
-
+  const collectionsAgainstBudgetProgress = totalBudget > 0
+    ? (trueCollectionsTotal / totalBudget) * 100
+    : 0;
   const pendingRequisitions = normalizedExpenses.filter((expense: any) =>
     ['PENDING', 'APPROVED_CHAIR', 'APPROVED_TREASURER'].includes(expense.status)
   );
@@ -145,6 +139,19 @@ const EventDashboard: React.FC = () => {
       {/* Event Header - Simplified for single event system */}
       <EventHeader 
         event={event}
+        operationalProgress={
+          parseFloat(
+            String(
+              (eventProgress as any)?.overall_progress ??
+              (eventProgress as any)?.completion_rate ??
+              event.operational_progress ??
+              0
+            )
+          ) || 0
+        }
+        financialProgress={
+          collectionsAgainstBudgetProgress
+        }
         onRefresh={refetch}
       />
 
@@ -470,8 +477,22 @@ const EventDashboard: React.FC = () => {
  */
 const EventHeader: React.FC<{ 
   event: Event;
+  operationalProgress: number;
+  financialProgress: number;
   onRefresh: () => void;
-}> = ({ event, onRefresh }) => {
+}> = ({ event, operationalProgress, financialProgress, onRefresh }) => {
+  const safeOperationalProgress = Math.min(Math.max(operationalProgress || 0, 0), 100);
+  const safeFinancialProgress = Math.min(Math.max(financialProgress || 0, 0), 100);
+
+  const eventDate = new Date(event.event_date);
+  const now = new Date();
+  const msDiff = eventDate.getTime() - now.getTime();
+  const isEventPassed = msDiff < 0;
+  const totalDays = Math.floor(Math.abs(msDiff) / (1000 * 60 * 60 * 24));
+  const countdownLabel = isEventPassed
+    ? `${totalDays} day${totalDays === 1 ? '' : 's'} since event`
+    : `${totalDays} day${totalDays === 1 ? '' : 's'} to event`;
+
   return (
     <Box sx={{ mb: 3 }}>
       <Box display="flex" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={2}>
@@ -496,6 +517,12 @@ const EventHeader: React.FC<{
               label={new Date(event.event_date).toLocaleDateString()}
               variant="outlined"
             />
+            <Chip
+              icon={<EventIcon />}
+              label={countdownLabel}
+              color={isEventPassed ? 'default' : 'secondary'}
+              variant={isEventPassed ? 'outlined' : 'filled'}
+            />
             <Chip icon={<LocationOn />} label={event.location} variant="outlined" />
           </Box>
           {event.description && (
@@ -514,6 +541,38 @@ const EventHeader: React.FC<{
           </Tooltip>
         </Box>
       </Box>
+
+      <Stack spacing={1.5} sx={{ mt: 2 }}>
+        <Box>
+          <Box display="flex" justifyContent="space-between" mb={0.5}>
+            <Typography variant="body2" fontWeight="medium">Overall Operational Progress</Typography>
+            <Typography variant="body2" fontWeight="bold" color="primary">
+              {safeOperationalProgress.toFixed(1)}%
+            </Typography>
+          </Box>
+          <LinearProgress
+            variant="determinate"
+            value={safeOperationalProgress}
+            color={safeOperationalProgress >= 75 ? 'success' : safeOperationalProgress >= 50 ? 'warning' : 'error'}
+            sx={{ height: 10, borderRadius: 999 }}
+          />
+        </Box>
+
+        <Box>
+          <Box display="flex" justifyContent="space-between" mb={0.5}>
+            <Typography variant="body2" fontWeight="medium">Overall Financial Progress</Typography>
+            <Typography variant="body2" fontWeight="bold" color="primary">
+              {safeFinancialProgress.toFixed(1)}%
+            </Typography>
+          </Box>
+          <LinearProgress
+            variant="determinate"
+            value={safeFinancialProgress}
+            color={safeFinancialProgress >= 75 ? 'success' : safeFinancialProgress >= 50 ? 'warning' : 'error'}
+            sx={{ height: 10, borderRadius: 999 }}
+          />
+        </Box>
+      </Stack>
     </Box>
   );
 };

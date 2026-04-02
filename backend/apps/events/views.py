@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q, Sum, Count, Avg
 from django.utils import timezone
+from collections import defaultdict
 
 from .models import (
     Event, EventMember, ClusterGroup, ClusterContribution, ClusterDeposit,
@@ -129,7 +130,7 @@ class EventViewSet(viewsets.ModelViewSet):
         logger.info(f"add_member called with data: {request.data}")
         
         event = self.get_object()
-        if not _has_any_role(request.user, event.id, {'chair', 'secretary'}):
+        if not _has_any_role(request.user, event.id, {'executive_admin', 'chair', 'secretary', 'treasurer'}):
             return Response(
                 {'detail': 'Permission denied'},
                 status=status.HTTP_403_FORBIDDEN
@@ -222,6 +223,8 @@ class EventViewSet(viewsets.ModelViewSet):
     def reports_summary(self, request, pk=None):
         """Aggregated event summary report"""
         from apps.tasks.models import Task
+        from apps.finance.models import Collection, Expense
+        from apps.committees.models import Committee
         event = self.get_object()
         start, end = self._parse_date_filters(request)
 
@@ -243,8 +246,84 @@ class EventViewSet(viewsets.ModelViewSet):
         total_members = event.members.filter(is_active=True).count()
 
         clusters = ClusterGroup.objects.filter(event=event)
-        total_collected = clusters.aggregate(t=Sum('collected_amount'))['t'] or 0
-        total_target    = clusters.aggregate(t=Sum('target_amount'))['t'] or 0
+        mobilisation_collected = clusters.aggregate(t=Sum('collected_amount'))['t'] or 0
+        mobilisation_target = clusters.aggregate(t=Sum('target_amount'))['t'] or 0
+
+        collections_qs = Collection.objects.filter(event=event)
+        expenses_qs = Expense.objects.filter(event=event)
+        if start:
+            collections_qs = collections_qs.filter(created_at__date__gte=start)
+            expenses_qs = expenses_qs.filter(created_at__date__gte=start)
+        if end:
+            collections_qs = collections_qs.filter(created_at__date__lte=end)
+            expenses_qs = expenses_qs.filter(created_at__date__lte=end)
+
+        deposits_qs = ClusterDeposit.objects.filter(cluster__event=event)
+        if start:
+            deposits_qs = deposits_qs.filter(created_at__date__gte=start)
+        if end:
+            deposits_qs = deposits_qs.filter(created_at__date__lte=end)
+
+        direct_collections_total = collections_qs.aggregate(t=Sum('amount'))['t'] or 0
+        cluster_deposits_total = deposits_qs.aggregate(t=Sum('amount'))['t'] or 0
+        total_collected = float(direct_collections_total) + float(cluster_deposits_total)
+        total_target = float(event.total_budget or 0)
+        total_spent = expenses_qs.filter(status='PAID').aggregate(t=Sum('amount'))['t'] or 0
+
+        daily_collections_map = defaultdict(float)
+        for entry in collections_qs.order_by('created_at'):
+            daily_collections_map[entry.created_at.date().isoformat()] += float(entry.amount)
+
+        daily_collections = [
+            {'label': day, 'value': value}
+            for day, value in sorted(daily_collections_map.items())
+        ]
+
+        latest_contributions = []
+        for entry in collections_qs.select_related('cluster').order_by('-created_at')[:10]:
+            latest_contributions.append({
+                'id': str(entry.id),
+                'source': entry.payer_name,
+                'cluster': entry.cluster.name if entry.cluster else '',
+                'amount': str(entry.amount),
+                'date': entry.created_at.date().isoformat(),
+                'type': 'ACTUAL',
+                'submission_status': 'SUBMITTED' if entry.source_type == 'CLUSTER' else 'PENDING',
+            })
+
+        largest_expenses = []
+        for expense in expenses_qs.filter(status='PAID').order_by('-amount')[:10]:
+            largest_expenses.append({
+                'id': str(expense.id),
+                'budget_item': expense.category or 'General',
+                'subcommittee': expense.vendor or '-',
+                'amount_approved': str(expense.amount),
+                'amount_paid': str(expense.amount),
+                'date_paid': expense.created_at.date().isoformat(),
+                'status': 'PAID',
+                'notes': expense.description or '',
+            })
+
+        pending_approvals = []
+        for expense in expenses_qs.filter(status__in=['PENDING', 'APPROVED_CHAIR', 'APPROVED_TREASURER']).order_by('-created_at')[:10]:
+            pending_approvals.append({
+                'id': str(expense.id),
+                'title': expense.vendor or expense.category or 'Requisition',
+                'status': expense.status,
+                'amount': str(expense.amount),
+            })
+
+        committees = Committee.objects.filter(event=event)
+        subcommittee_progress = []
+        for committee in committees:
+            committee_tasks = tasks_qs.filter(committee=committee)
+            committee_total = committee_tasks.count()
+            committee_completed = committee_tasks.filter(status='COMPLETED').count()
+            progress_value = round((committee_completed / committee_total) * 100, 1) if committee_total else 0
+            subcommittee_progress.append({
+                'label': committee.name,
+                'value': progress_value,
+            })
 
         kpis = {
             'tasks_completed': {
@@ -266,6 +345,16 @@ class EventViewSet(viewsets.ModelViewSet):
                 'icon': 'AttachMoney',
                 'format': 'currency',
             },
+            'funds_spent': {
+                'label': 'Funds Spent',
+                'value': float(total_spent),
+                'total': float(event.total_budget or 0),
+                'percentage': round(float(total_spent) / float(event.total_budget) * 100, 1) if event.total_budget else 0,
+                'trend': 'neutral',
+                'color': 'warning',
+                'icon': 'TrendingUp',
+                'format': 'currency',
+            },
             'members': {
                 'label': 'Active Members',
                 'value': total_members,
@@ -282,6 +371,15 @@ class EventViewSet(viewsets.ModelViewSet):
                 'percentage': float(event.overall_progress),
                 'trend': 'up',
                 'color': 'warning',
+                'icon': 'TrendingUp',
+            },
+            'mobilization_progress': {
+                'label': 'Mobilization Progress',
+                'value': round(float(mobilisation_collected) / float(mobilisation_target) * 100, 1) if mobilisation_target else 0,
+                'total': 100,
+                'percentage': round(float(mobilisation_collected) / float(mobilisation_target) * 100, 1) if mobilisation_target else 0,
+                'trend': 'up',
+                'color': 'info',
                 'icon': 'TrendingUp',
             },
         }
@@ -306,8 +404,14 @@ class EventViewSet(viewsets.ModelViewSet):
         ]
 
         return Response({
+            'event_name': event.name,
             'kpis': kpis,
             'overdue_tasks': overdue_list,
+            'daily_collections': daily_collections,
+            'latest_contributions': latest_contributions,
+            'largest_expenses': largest_expenses,
+            'pending_approvals': pending_approvals,
+            'subcommittee_progress': subcommittee_progress,
             'task_status_chart': task_status_chart,
             'event_details': {
                 'name': event.name,
@@ -346,6 +450,7 @@ class EventViewSet(viewsets.ModelViewSet):
                 'completed_tasks': done,
                 'pending_tasks': c_tasks.filter(status='PENDING').count(),
                 'in_progress_tasks': c_tasks.filter(status='IN_PROGRESS').count(),
+                'blocked_count': c_tasks.filter(status='CANCELLED').count(),
                 'completion_rate': round(done / total * 100, 1) if total else 0,
                 'overdue_count': c_tasks.filter(
                     status__in=['PENDING', 'IN_PROGRESS'],
@@ -364,7 +469,7 @@ class EventViewSet(viewsets.ModelViewSet):
                 'assigned_to': t.assigned_to.get_full_name() if t.assigned_to else '',
                 'deadline': t.deadline.isoformat() if t.deadline else None,
                 'days_remaining': (t.deadline - timezone.now()).days if t.deadline else None,
-                'completion_percentage': 100 if t.status == 'COMPLETED' else 0,
+                'completion_percentage': float(t.progress_percentage or 0),
             })
 
         priority_chart = []
@@ -373,6 +478,7 @@ class EventViewSet(viewsets.ModelViewSet):
             priority_chart.append({'label': priority.title(), 'value': count})
 
         return Response({
+            'event_name': event.name,
             'subcommittee_performance': subcommittee_data,
             'recent_tasks': recent_tasks,
             'priority_breakdown': priority_chart,
@@ -381,6 +487,7 @@ class EventViewSet(viewsets.ModelViewSet):
                 'completed': tasks_qs.filter(status='COMPLETED').count(),
                 'in_progress': tasks_qs.filter(status='IN_PROGRESS').count(),
                 'pending': tasks_qs.filter(status='PENDING').count(),
+                'cancelled': tasks_qs.filter(status='CANCELLED').count(),
                 'overdue': tasks_qs.filter(
                     status__in=['PENDING', 'IN_PROGRESS'],
                     deadline__lt=timezone.now()
@@ -407,6 +514,9 @@ class EventViewSet(viewsets.ModelViewSet):
 
         total_income  = collections_qs.aggregate(t=Sum('amount'))['t'] or 0
         total_expense = expenses_qs.filter(status='PAID').aggregate(t=Sum('amount'))['t'] or 0
+        pending_budget_items_count = expenses_qs.filter(
+            status__in=['PENDING', 'APPROVED_CHAIR', 'APPROVED_TREASURER']
+        ).count()
 
         income_ledger = []
         for c in collections_qs.order_by('-created_at')[:50]:
@@ -441,12 +551,14 @@ class EventViewSet(viewsets.ModelViewSet):
                 channel_breakdown.append({'label': channel, 'value': float(total)})
 
         return Response({
+            'event_name': event.name,
             'summary': {
                 'total_income': float(total_income),
                 'total_expense': float(total_expense),
                 'balance': float(total_income) - float(total_expense),
                 'total_budget': float(event.total_budget),
                 'budget_utilization': round(float(total_expense) / float(event.total_budget) * 100, 1) if event.total_budget else 0,
+                'pending_budget_items_count': pending_budget_items_count,
             },
             'income_ledger': income_ledger,
             'expense_ledger': expense_ledger,
@@ -509,6 +621,7 @@ class EventViewSet(viewsets.ModelViewSet):
         total_collected = sum(r['collected_amount'] for r in cluster_rows)
 
         return Response({
+            'event_name': event.name,
             'clusters': cluster_rows,
             'collection_ledger': collection_ledger,
             'totals': {
@@ -555,6 +668,10 @@ class EventViewSet(viewsets.ModelViewSet):
                 'tasks_completed': completed,
                 'tasks_overdue': overdue,
                 'completion_rate': round(completed / total * 100, 1) if total else 0,
+                'subcommittees_assigned': list(
+                    m.user.committee_memberships.filter(committee__event=event).values_list('committee__name', flat=True).distinct()
+                ),
+                'cluster_role': 'LEAD' if ClusterGroup.objects.filter(event=event, cluster_lead=m.user).exists() else 'NONE',
                 'joined_at': m.joined_at.isoformat(),
                 'is_official': m.is_official,
             })
@@ -566,6 +683,7 @@ class EventViewSet(viewsets.ModelViewSet):
                 role_distribution.append({'label': label, 'value': count})
 
         return Response({
+            'event_name': event.name,
             'members': member_rows,
             'role_distribution': role_distribution,
             'totals': {
@@ -609,19 +727,19 @@ class EventMemberViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         event_id = request.data.get('event')
-        if not _has_any_role(request.user, event_id, {'chair', 'secretary'}):
+        if not _has_any_role(request.user, event_id, {'executive_admin', 'chair', 'secretary', 'treasurer'}):
             return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
         return super().create(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
         member = self.get_object()
-        if not _has_any_role(request.user, member.event_id, {'chair', 'secretary'}):
+        if not _has_any_role(request.user, member.event_id, {'executive_admin', 'chair', 'secretary', 'treasurer'}):
             return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
         return super().partial_update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
         member = self.get_object()
-        if not _has_any_role(request.user, member.event_id, {'chair', 'secretary'}):
+        if not _has_any_role(request.user, member.event_id, {'executive_admin', 'chair', 'secretary', 'treasurer'}):
             return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
         return super().destroy(request, *args, **kwargs)
     

@@ -85,9 +85,15 @@ class User(AbstractBaseUser, PermissionsMixin):
 
 class OTP(models.Model):
     """OTP model for phone/email verification"""
+
+    PURPOSE_CHOICES = [
+        ('login', 'Login'),
+        ('password_reset', 'Password Reset'),
+    ]
     
     phone = models.CharField(max_length=15, blank=True, null=True)
     email = models.EmailField(blank=True, null=True)
+    purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES, default='login')
     otp_code = models.CharField(max_length=6)
     is_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)

@@ -18,6 +18,7 @@ import {
   Button,
   Stack,
   Alert,
+  AlertTitle,
   Skeleton,
   useTheme,
   useMediaQuery,
@@ -42,9 +43,20 @@ import {
   AttachMoney as MoneyIcon,
   Dashboard as DashboardIcon,
   Payment as PaymentIcon,
+  AutoFixHigh as AutoParseIcon,
+  Upload as UploadIcon,
+  DeleteOutline as DeleteOutlineIcon,
 } from '@mui/icons-material';
 import { eventService } from '../services/event.service';
 import type { ExpensePhase6 } from '../types';
+import { parseMpesaMessage } from '../utils/mpesa';
+
+interface ParsedPaymentEntry {
+  payer_name: string;
+  payer_phone?: string;
+  amount: number;
+  reference_number?: string;
+}
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -86,6 +98,9 @@ const TreasuryPage: React.FC = () => {
 
   // Record general collection dialog
   const [collectionDialog, setCollectionDialog] = useState(false);
+  const [mpesaRawMessage, setMpesaRawMessage] = useState('');
+  const [batchRawMessages, setBatchRawMessages] = useState('');
+  const [batchParsedEntries, setBatchParsedEntries] = useState<ParsedPaymentEntry[]>([]);
   const [collectionForm, setCollectionForm] = useState({
     payer_name: '',
     payer_phone: '',
@@ -126,6 +141,12 @@ const TreasuryPage: React.FC = () => {
     enabled: !!eventId,
   });
 
+  const { data: clusters, isLoading: loadingClusters } = useQuery({
+    queryKey: ['clusters', eventId, 'treasury'],
+    queryFn: () => eventService.getEventClusters(eventId!),
+    enabled: !!eventId,
+  });
+
   // â”€â”€â”€ Normalized data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const normalizedCollections: any[] = Array.isArray(collections)
     ? collections : ((collections as any)?.results || []);
@@ -133,6 +154,8 @@ const TreasuryPage: React.FC = () => {
     ? expenses : ((expenses as any)?.results || []);
   const normalizedDeposits: any[] = Array.isArray(deposits)
     ? deposits : ((deposits as any)?.results || []);
+  const normalizedClusters: any[] = Array.isArray(clusters)
+    ? clusters : ((clusters as any)?.results || []);
 
   const parseAmount = (value: unknown): number => {
     const num = typeof value === 'number' ? value : parseFloat(String(value ?? 0));
@@ -185,9 +208,13 @@ const TreasuryPage: React.FC = () => {
   const clusterCollectedAmount = clusterCollections.reduce((sum, item) => sum + parseAmount(item.amount), 0);
   const generalCollectedAmount = generalCollections.reduce((sum, item) => sum + parseAmount(item.amount), 0);
   const totalSpentAmount = parseAmount(financialSummary?.expenses?.total);
+  const treasuryBalance = totalCollectedAmount - totalSpentAmount;
+  const totalUnsubmittedFunds = normalizedClusters.reduce(
+    (sum, cluster) => sum + parseAmount(cluster.pending_in_lead_account || cluster.funds_in_lead_account),
+    0
+  );
   const pendingExpenseAmount = parseAmount(financialSummary?.expenses?.pending);
   const budgetUtilization = parseAmount(financialSummary?.budget_utilization);
-  const surplusOrDeficit = totalCollectedAmount - totalSpentAmount;
   const hasHighPendingBudget = totalSpentAmount > 0 && (pendingExpenseAmount / totalSpentAmount) > 0.3;
   const hasBudgetOverrun = budgetUtilization > 100;
   const isUnderfunded = totalCollectedAmount < totalSpentAmount;
@@ -251,6 +278,9 @@ const TreasuryPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['collections'] });
       queryClient.invalidateQueries({ queryKey: ['financial-summary'] });
       setCollectionDialog(false);
+      setMpesaRawMessage('');
+      setBatchRawMessages('');
+      setBatchParsedEntries([]);
       setCollectionForm({
         payer_name: '',
         payer_phone: '',
@@ -300,6 +330,86 @@ const TreasuryPage: React.FC = () => {
       reference_number: collectionForm.reference_number || undefined,
       description: collectionForm.description || undefined,
     });
+  };
+
+  const handleParseMpesaMessage = () => {
+    const parsed = parseMpesaMessage(mpesaRawMessage);
+    if (!parsed) {
+      return;
+    }
+
+    setCollectionForm((current) => ({
+      ...current,
+      payer_name: parsed.contributorName || current.payer_name,
+      payer_phone: parsed.contributorPhone || current.payer_phone,
+      amount: parsed.amount != null ? String(parsed.amount) : current.amount,
+      channel: 'MPESA',
+      reference_number: parsed.transactionReference || current.reference_number,
+    }));
+  };
+
+  const handleParseBatchMessages = () => {
+    const lines = batchRawMessages
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const parsedEntries = lines
+      .map((line) => parseMpesaMessage(line))
+      .filter((parsed): parsed is NonNullable<typeof parsed> => !!parsed && !!parsed.contributorName && typeof parsed.amount === 'number')
+      .map((parsed) => ({
+        payer_name: parsed.contributorName!,
+        payer_phone: parsed.contributorPhone,
+        amount: parsed.amount!,
+        reference_number: parsed.transactionReference,
+      }));
+
+    setBatchParsedEntries(parsedEntries);
+  };
+
+  const handleUpdateParsedEntry = (
+    index: number,
+    field: keyof ParsedPaymentEntry,
+    value: string | number
+  ) => {
+    setBatchParsedEntries((prev) =>
+      prev.map((entry, entryIndex) =>
+        entryIndex === index
+          ? {
+              ...entry,
+              [field]: field === 'amount' ? Number(value) || 0 : value,
+            }
+          : entry
+      )
+    );
+  };
+
+  const handleRemoveParsedEntry = (index: number) => {
+    setBatchParsedEntries((prev) => prev.filter((_, entryIndex) => entryIndex !== index));
+  };
+
+  const handleImportBatchMessages = async () => {
+    if (!eventId || !mainCommittee || batchParsedEntries.length === 0) {
+      return;
+    }
+
+    const requests = batchParsedEntries.map((entry) =>
+      eventService.createGeneralCollection({
+        event: eventId,
+        committee_id: Number((mainCommittee as any).id),
+        payer_name: entry.payer_name,
+        payer_phone: entry.payer_phone || undefined,
+        amount: entry.amount,
+        channel: 'MPESA',
+        reference_number: entry.reference_number || undefined,
+      })
+    );
+
+    await Promise.allSettled(requests);
+    queryClient.invalidateQueries({ queryKey: ['collections'] });
+    queryClient.invalidateQueries({ queryKey: ['financial-summary'] });
+    setBatchParsedEntries([]);
+    setBatchRawMessages('');
   };
 
   // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -521,7 +631,7 @@ const TreasuryPage: React.FC = () => {
     </TableContainer>
   );
 
-  if (loadingCollections || loadingExpenses || loadingSummary) {
+  if (loadingCollections || loadingExpenses || loadingSummary || loadingDeposits || loadingClusters) {
     return (
       <Box sx={{ p: { xs: 2, md: 3 } }}>
         <Skeleton variant="rectangular" height={200} sx={{ mb: 3, borderRadius: 2 }} />
@@ -545,6 +655,10 @@ const TreasuryPage: React.FC = () => {
 
       {/* Top Summary Cards */}
       {financialSummary && (
+        <>
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Balance means <strong>all treasury-visible collected funds minus paid expenses</strong>. Total Unsubmitted Funds shows money still held by cluster leads and not yet submitted to treasury.
+        </Alert>
         <Grid container spacing={2} sx={{ mb: 3 }}>
           <Grid item xs={6} md={3}>
             <Card>
@@ -555,7 +669,10 @@ const TreasuryPage: React.FC = () => {
                     <Typography variant="caption" color="text.secondary">Balance</Typography>
                   </Stack>
                   <Typography variant={isMobile ? 'h6' : 'h5'} fontWeight="bold" color="success.main">
-                    {formatCurrency(financialSummary.balance)}
+                    {formatCurrency(treasuryBalance)}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Treasury-visible collections less paid expenses
                   </Typography>
                 </Stack>
               </CardContent>
@@ -572,6 +689,9 @@ const TreasuryPage: React.FC = () => {
                   <Typography variant={isMobile ? 'h6' : 'h5'} fontWeight="bold">
                     {formatCurrency(totalCollectedAmount)}
                   </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Direct receipts plus cluster deposits
+                  </Typography>
                 </Stack>
               </CardContent>
             </Card>
@@ -587,6 +707,9 @@ const TreasuryPage: React.FC = () => {
                   <Typography variant={isMobile ? 'h6' : 'h5'} fontWeight="bold">
                     {formatCurrency(financialSummary.expenses.total)}
                   </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Paid expenses already posted to treasury
+                  </Typography>
                 </Stack>
               </CardContent>
             </Card>
@@ -597,30 +720,56 @@ const TreasuryPage: React.FC = () => {
                 <Stack spacing={0.5}>
                   <Stack direction="row" alignItems="center" spacing={1}>
                     <RequestIcon color="info" fontSize="small" />
-                    <Typography variant="caption" color="text.secondary">Surplus / Deficit</Typography>
+                    <Typography variant="caption" color="text.secondary">Total Unsubmitted Funds</Typography>
                   </Stack>
                   <Typography
                     variant={isMobile ? 'h6' : 'h5'}
                     fontWeight="bold"
-                    color={surplusOrDeficit >= 0 ? 'success.main' : 'error.main'}
+                    color={totalUnsubmittedFunds > 0 ? 'warning.main' : 'success.main'}
                   >
-                    {formatCurrency(surplusOrDeficit)}
+                    {formatCurrency(totalUnsubmittedFunds)}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Funds still with cluster leads, not yet submitted
                   </Typography>
                 </Stack>
               </CardContent>
             </Card>
           </Grid>
         </Grid>
+        </>
       )}
 
       {financialSummary && (
         <Stack spacing={1.5} sx={{ mb: 3 }}>
-          <Alert severity={budgetUtilization >= 70 ? 'success' : budgetUtilization >= 40 ? 'warning' : 'error'}>
-            Financial progress (budget utilization): <strong>{budgetUtilization.toFixed(1)}%</strong>
-          </Alert>
           {isUnderfunded && (
             <Alert severity="warning">
               Insufficient funds risk: total funds collected are below total funds spent.
+            </Alert>
+          )}
+          {totalUnsubmittedFunds > 0 && (
+            <Alert severity="warning">
+              <AlertTitle>Unsubmitted Funds Outstanding</AlertTitle>
+              <strong>{formatCurrency(totalUnsubmittedFunds)}</strong> is still held by cluster leads and needs treasury follow-up.
+              <Box
+                component="ul"
+                sx={{ mt: 1, mb: 0, pl: 2, '& li': { mb: 0.5 } }}
+              >
+                {normalizedClusters
+                  .filter((c) => parseAmount(c.pending_in_lead_account || c.funds_in_lead_account) > 0)
+                  .sort((a, b) =>
+                    parseAmount(b.pending_in_lead_account || b.funds_in_lead_account) -
+                    parseAmount(a.pending_in_lead_account || a.funds_in_lead_account)
+                  )
+                  .map((c) => (
+                    <li key={c.id}>
+                      <strong>{c.name}</strong>
+                      {c.cluster_lead_name ? ` (Lead: ${c.cluster_lead_name})` : ''}
+                      {' — '}
+                      <strong style={{ color: 'inherit' }}>{formatCurrency(parseAmount(c.pending_in_lead_account || c.funds_in_lead_account))}</strong>
+                    </li>
+                  ))}
+              </Box>
             </Alert>
           )}
           {hasHighPendingBudget && (
@@ -1139,6 +1288,115 @@ const TreasuryPage: React.FC = () => {
             <Alert severity="info">
               This records a <strong>general/direct</strong> incoming payment to treasury.
             </Alert>
+
+            <TextField
+              label="Paste Single M-Pesa Message"
+              value={mpesaRawMessage}
+              onChange={(e) => setMpesaRawMessage(e.target.value)}
+              multiline
+              minRows={3}
+              placeholder="Paste the full M-Pesa SMS here to auto-fill the form"
+              fullWidth
+            />
+
+            <Button variant="outlined" startIcon={<AutoParseIcon />} onClick={handleParseMpesaMessage}>
+              Parse M-Pesa Message
+            </Button>
+
+            <Divider />
+
+            <TextField
+              label="Paste Multiple Direct M-Pesa Messages"
+              value={batchRawMessages}
+              onChange={(e) => setBatchRawMessages(e.target.value)}
+              multiline
+              minRows={4}
+              placeholder="Paste one M-Pesa message per line"
+              fullWidth
+            />
+
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+              <Button variant="outlined" startIcon={<AutoParseIcon />} onClick={handleParseBatchMessages}>
+                Parse Bulk Messages
+              </Button>
+              <Button
+                variant="contained"
+                startIcon={<UploadIcon />}
+                onClick={handleImportBatchMessages}
+                disabled={batchParsedEntries.length === 0 || !mainCommittee}
+              >
+                Import Parsed ({batchParsedEntries.length})
+              </Button>
+            </Stack>
+
+            {batchParsedEntries.length > 0 && (
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>#</TableCell>
+                      <TableCell>Name</TableCell>
+                      <TableCell>Phone</TableCell>
+                      <TableCell>Amount</TableCell>
+                      <TableCell>Reference</TableCell>
+                      <TableCell align="right">Action</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {batchParsedEntries.map((entry, index) => (
+                      <TableRow key={`${entry.reference_number || 'payment'}-${index}`}>
+                        <TableCell>{index + 1}</TableCell>
+                        <TableCell>
+                          <TextField
+                            size="small"
+                            fullWidth
+                            value={entry.payer_name}
+                            onChange={(e) => handleUpdateParsedEntry(index, 'payer_name', e.target.value)}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <TextField
+                            size="small"
+                            fullWidth
+                            value={entry.payer_phone || ''}
+                            onChange={(e) => handleUpdateParsedEntry(index, 'payer_phone', e.target.value)}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <TextField
+                            size="small"
+                            type="number"
+                            fullWidth
+                            value={entry.amount}
+                            onChange={(e) => handleUpdateParsedEntry(index, 'amount', e.target.value)}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <TextField
+                            size="small"
+                            fullWidth
+                            value={entry.reference_number || ''}
+                            onChange={(e) => handleUpdateParsedEntry(index, 'reference_number', e.target.value)}
+                          />
+                        </TableCell>
+                        <TableCell align="right">
+                          <Button
+                            color="error"
+                            size="small"
+                            startIcon={<DeleteOutlineIcon />}
+                            onClick={() => handleRemoveParsedEntry(index)}
+                          >
+                            Remove
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+
+            <Divider />
 
             <TextField
               label="Payer Name"

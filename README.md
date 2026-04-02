@@ -1,398 +1,213 @@
+﻿# EOMS - Events Operations Management System
 
-# EOMS - Events Operations Management System
+EOMS is a web platform for managing event operations, committees, fundraising, approvals, and finance workflows from one dashboard.
 
-A comprehensive web platform for managing funeral and general event operations. Built with Django REST Framework backend and React TypeScript frontend.
+## Core Modules
 
-## Features
-
-- 👥 User & Role Management (Admin, Leaders, Members, Finance Officers, Stakeholders)
-- 🏛️ Committee Management with member assignments
-- ✅ Task Management with assignments and tracking
-- 💰 Finance Management (Collections & Expenses)
-- 🏢 Service Provider Management
-- 📊 Comprehensive Reporting
-- 🔐 JWT Authentication with OTP verification
-- 🔔 Background tasks with Celery
-- 📱 Responsive web interface
+- Event dashboard (operations + finance progress)
+- Committee and member management
+- Subcommittees and task tracking
+- Budget items, requisitions, and treasury payments
+- Cluster mobilisation and contribution tracking
+- Approval center (role-based)
+- Reports and exports
+- OTP-based authentication
 
 ## Tech Stack
 
 ### Backend
-- Django 5.0
+- Django 5
 - Django REST Framework
-- PostgreSQL 16
-- Redis (Celery broker)
-- JWT Authentication
+- PostgreSQL
+- Redis
+- Celery + Celery Beat
+- Gunicorn
 
 ### Frontend
-- React 19 with TypeScript
-- Vite (build tool)
-- Material-UI (UI components)
-- React Router (routing)
-- TanStack Query (data fetching)
-- Axios (HTTP client)
+- React 19 + TypeScript
+- Vite
+- Material UI
+- React Router
+- TanStack Query
 
-### DevOps
-- Docker & Docker Compose
-- Multi-stage Dockerfiles
-- Nginx (Production)
-- Gunicorn (Production)
+### Infrastructure
+- Docker + Docker Compose
+- Nginx (reverse proxy in production)
 
-## Quick Start (Docker - Recommended)
+## Project Structure
+
+```text
+eoms/
+|- backend/                   # Django API
+|  |- apps/                   # Domain apps (users, events, finance, tasks, etc.)
+|  |- eoms_api/               # Django settings, urls, wsgi/asgi, celery
+|  |- Dockerfile
+|  |- Dockerfile.prod
+|  |- requirements.txt
+|- frontend/                  # React app
+|  |- src/
+|  |- Dockerfile
+|  |- Dockerfile.prod
+|  |- nginx.conf
+|  |- nginx.prod.conf
+|- nginx/
+|  |- conf.d/default.conf     # Production reverse proxy config
+|- db/
+|  |- .env.example            # Postgres env template
+|- docker-compose.yml         # Local development
+|- docker-compose.prod.yml    # Production
+|- deploy_local_to_vps.ps1    # Local-to-VPS deployment (no GitHub CI/CD)
+```
+
+## Local Development (Docker)
 
 ### Prerequisites
-- Docker & Docker Compose installed
+- Docker Desktop (or Docker Engine + Compose)
 - Git
 
-### Development Mode
+### Start services
 
 ```bash
-# 1. Clone the repository
-git clone <repository-url>
-cd eoms
-
-# 2. Start all services (backend + frontend + database)
-docker-compose up
-
-# 3. In another terminal, run migrations
-docker-compose exec backend python manage.py migrate
-
-# 4. Create a superuser
-docker-compose exec backend python manage.py createsuperuser
-``React frontend (port 5173)
-- Celery worker
-- Celery beat
-
-## Project Structure
-
+docker compose up -d --build
 ```
-eoms/
-├── backend/              # Django REST API
-│   ├── apps/            # Django apps (users, committees, tasks, etc.)
-│   ├── eoms_api/        # Project settings
-│   ├── Dockerfile       # Backend container
-│   └── requirements.txt
-├── frontend/            # React TypeScript app
-│   ├── src/
-│   │   ├── components/  # Reusable UI components
-│   │   ├── contexts/    # React contexts (auth, etc.)
-│   │   ├── pages/       # Page components
-│   │   ├── services/    # API service layer
-│   │   └── types/       # TypeScript definitions
-│   ├── Dockerfile       # Frontend multi-stage build
-│   ├── nginx.conf       # Production nginx config
-│   └── package.json
-├── docker/              # Docker configurations
-├── docs/                # Documentation
-├── docker-compose.yml       # Development compose
-├── docker-compose.prod.yml  # Production compose
-└── README.md
+
+### Run backend setup
+
+```bash
+docker compose exec backend python manage.py migrate
+docker compose exec backend python manage.py collectstatic --noinput
 ```
-**Access the application:**
+
+### Create admin user
+
+This project uses a custom phone-based user model.
+
+```bash
+docker compose exec backend python manage.py createsuperuser
+```
+
+You will be prompted for:
+- phone
+- full_name
+- password
+
+### Access URLs
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:8000/api/
-- Admin Panel: http://localhost:8000/admin/
+- Admin: http://localhost:8000/admin/
 
-### Production Mode
+## Production (Docker Compose)
 
-```bash
-# 1. Setup environment variables
-cp .env.prod.example .env.prod
-# Edit .env.prod with your secure values
-
-# 2. Build and start services
-docker-compose -f docker-compose.prod.yml up -d --build
-
-# 3. Run migrations
-docker-compose -f docker-compose.prod.yml exec backend python manage.py migrate
-
-# 4. Create superuser
-docker-compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser
-
-# 5. Collect static files
-docker-compose -f docker-compose.prod.yml exec backend python manage.py collectstatic
-```
-
-**Access the application:**
-- Full Application: http://localhost (Nginx serves frontend + proxies API)
-
-📖 **For detailed Docker instructions, see [DOCKER.md](DOCKER.md)**
-
-## Quick Start (Local Development - Without Docker)
-
-### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- PostgreSQL 16
-- Redis
-
-### Backend Setup
+### 1. Prepare env files
 
 ```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py createsuperuser
-python manage.py runserver
+cp backend/.env.example backend/.env
+cp db/.env.example db/.env
 ```
 
-### Frontend Setup
+Update secure values in both files.
+
+### 2. Start production stack
 
 ```bash
-cd frontend
-npm install
-npm run dev
+docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-This will start:
-- PostgreSQL database (port 5432)
-- Redis (port 6379)
-- Django backend (port 8000)
-- Celery worker
-- Celery beat
+### 3. Run post-start commands
 
-### 3. Run migrations
 ```bash
-docker-compose exec backend python manage.py migrate
+docker compose -f docker-compose.prod.yml exec -T backend python manage.py migrate --noinput
+docker compose -f docker-compose.prod.yml exec -T backend python manage.py collectstatic --noinput
 ```
 
-### 4. Create a superuser
+### 4. Create superuser
+
 ```bash
-docker-compose exec backend python manage.py createsuperuser
+docker compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser
 ```
 
-### 5. Access the application
-- API: http://localhost:8000/api/
-- Admin Panel: http://localhost:8000/admin/
-- API Documentation: http://localhost:8000/api/docs/
+## Deploy to VPS Without GitHub CI/CD
 
-## API Endpoints
+Deploy directly from your local workspace to server via SSH:
 
-### Authentication
-- `POST /api/auth/login/` - Request OTP
-- `POST /api/auth/verify_otp/` - Verify OTP & get JWT tokens
-- `GET /api/auth/me/` - Get current user profile
-- `PUT /api/auth/update_profile/` - Update profile
-- `POST /api/auth/change_password/` - Change password
+```powershell
+./deploy_local_to_vps.ps1 -ServerIp 194.37.81.174 -Force
+```
 
-### Users
-- `GET /api/users/` - List users
-- `POST /api/users/` - Create user
-- `GET /api/users/{id}/` - Get user details
-- `PUT /api/users/{id}/` - Update user
-- `DELETE /api/users/{id}/` - Delete user
+What this script does:
+- packages local source code
+- uploads to server
+- preserves existing backend/.env and db/.env on server
+- runs docker compose deploy
+- runs migrate + collectstatic (unless skipped)
 
-### Committees
-- `GET /api/committees/` - List committees
-- `POST /api/committees/` - Create committee
-- `GET /api/committees/{id}/` - Get committee details
-- `POST /api/committees/{id}/add_member/` - Add member
-- `DELETE /api/committees/{id}/remove_member/` - Remove member
-- `GET /api/committees/my_committees/` - Get user's committees
+Optional flags:
+- `-SkipBuild`
+- `-SkipMigrate`
 
-### Tasks
-- `GET /api/tasks/` - List tasks
-- `POST /api/tasks/` - Create task
-- `GET /api/tasks/{id}/` - Get task details
-- `PATCH /api/tasks/{id}/update_status/` - Update task status
-- `POST /api/tasks/{id}/add_comment/` - Add comment to task
-- `GET /api/tasks/my_tasks/` - Get user's assigned tasks
+## Useful Commands
 
-### Finance
-- `GET /api/finance/collections/` - List collections
-- `POST /api/finance/collections/` - Record collection
-- `GET /api/finance/expenses/` - List expenses
-- `POST /api/finance/expenses/` - Create expense
-- `POST /api/finance/expenses/{id}/approve/` - Approve expense
-- `POST /api/finance/expenses/{id}/reject/` - Reject expense
-- `POST /api/finance/expenses/{id}/mark_paid/` - Mark as paid
-- `GET /api/finance/summary/?committee={id}` - Finance summary
+### Logs
 
-### Service Providers
-- `GET /api/providers/` - List providers
-- `POST /api/providers/` - Add provider
-- `GET /api/providers/{id}/` - Get provider details
-- `PATCH /api/providers/{id}/update_status/` - Update status
-
-### Reports
-- `GET /api/reports/committee_report/?committee={id}` - Committee report
-- `GET /api/reports/event_summary/?committee={id}` - Event summary
-- `GET /api/reports/user_activity/?user_id={id}` - User activity
-- `GET /api/reports/all_committees/` - All committees report
-
-## Development
-
-### View logs
 ```bash
-docker-compose logs -f backend
+docker compose logs -f backend
+docker compose logs -f frontend
+docker compose logs -f nginx
 ```
 
-### Stop services
+### Restart one service
+
 ```bash
-docker-compose down
+docker compose restart backend
 ```
 
-### Rebuild after changes
+### Rebuild one service
+
 ```bash
-docker-compose up -d --build
+docker compose build backend
+docker compose up -d backend
 ```
 
-### Run Django commands
+### Run arbitrary Django command
+
 ```bash
-docker-compose exec backend python manage.py <command>
+docker compose exec backend python manage.py <command>
 ```
 
-### Run tests
-```bash
-docker-compose exec backend pytest
-```
+## API Areas
 
-## Project Structure
-
-```
-eoms/
-├── backend/
-│   ├── apps/
-│   │   ├── users/          # User management & auth
-│   │   ├── committees/     # Committee management
-│   │   ├── tasks/          # Task management
-│   │   ├── finance/        # Collections & expenses
-│   │   ├── providers/      # Service providers
-│   │   └── reports/        # Reporting
-│   ├── eoms_api/
-│   │   ├── settings.py     # Django settings
-│   │   ├── urls.py         # URL routing
-│   │   └── celery.py       # Celery config
-│   ├── Dockerfile
-│   └── requirements.txt
-├── frontend/               # (To be implemented)
-├── docker-compose.yml
-└── README.md
-```
+- Auth: `/api/auth/...`
+- Users: `/api/users/...`
+- Committees: `/api/committees/...`
+- Tasks: `/api/tasks/...`
+- Finance: `/api/finance/...`
+- Providers: `/api/providers/...`
+- Reports: `/api/reports/...`
 
 ## Environment Variables
 
-See `backend/.env.example` for all available environment variables.
+See templates:
+- backend/.env.example
+- db/.env.example
 
-Key variables:
-- `SECRET_KEY` - Django secret key
-- `DEBUG` - Debug mode (True/False)
-- `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST` - Database config
-- `REDIS_URL` - Redis connection URL
+Most important values:
+- `SECRET_KEY`
+- `DEBUG`
+- `ALLOWED_HOSTS`
+- `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`
+- `REDIS_URL`
+- `EMAIL_*`
 
-## Next Steps
+## Notes
 
-1. ✅ Backend API completed
-2. ⏳ Build mobile frontend (React Native or Flutter)
-3. ⏳ Implement SMS integration for OTP
-4. ⏳ Add email notifications
-5. ⏳ Deploy to production VPS
-
-## License
-
-Proprietary - All rights reserved
+- Admin and API static assets are served correctly in production through the shared static volume and Nginx.
+- The app uses role-based visibility, so module access depends on user role.
 
 ## Support
 
-For questions or support, contact the development team
-- Gunicorn
-- SSL via Let's Encrypt
+If you need deployment or runtime help, capture:
+- `docker compose ps`
+- relevant container logs
+- recent command output
 
----
-
-## 🗂️ Project Structure
-```
-backend/
-│ manage.py
-└── eoms_api/
-      settings.py
-      urls.py
-      apps/
-        users/
-        committees/
-        tasks/
-        finance/
-        providers/
-        reports/
-frontend/
-│ (Flutter or React Native app)
-docs/
-│ EOMS_SYSTEM_DOCUMENTATION.md
-```
-
----
-
-## 🔌 API Overview
-### Authentication
-- **POST /auth/login/** — Request OTP
-- **POST /auth/verify/** — Verify OTP → Get JWT
-
-### Users
-- **GET /users/**
-- **POST /users/**
-
-### Committees
-- **GET /committees/**
-- **POST /committees/**
-- **POST /committees/{id}/members/**
-
-### Tasks
-- **GET /tasks/?committee={id}**
-- **POST /tasks/**
-- **PATCH /tasks/{id}/status/**
-
-### Finance
-- **POST /collections/**
-- **POST /expenses/**
-- **GET /finance/summary/**
-
----
-
-## 🛡 Security
-- JWT authentication
-- Role-based access control (RBAC)
-- Rate limiting
-- Encrypted file storage
-- HTTPS enforced
-- Audit logs for financial actions
-
----
-
-## 🧪 Testing
-- Unit tests (Django)
-- API tests (pytest + DRF)
-- UI tests (Flutter or Jest)
-- Load tests (Locust)
-
----
-
-## 🚀 Deployment (Truehost VPS)
-1. SSH into server
-2. Install Docker & Docker Compose
-3. Clone repo
-4. Setup `.env` files
-5. Configure NGINX reverse proxy
-6. Setup SSL with Certbot
-7. Start Docker services
-8. Run Django migrations
-
----
-
-## 🌱 Contributing
-Pull requests are welcome. For major changes, open an issue to discuss what you’d like to add.
-
----
-
-## 📄 License
-This project is licensed for private and organizational use under the creator's terms.
-
----
-
-## 📚 Documentation
-Complete documentation can be found in:
-```
-docs/EOMS_SYSTEM_DOCUMENTATION.md
-```
-
+Then share those details for faster troubleshooting.

@@ -1,131 +1,123 @@
-# Production Docker Compose Configuration
-# Use this for production deployment with Nginx serving static files
+version: "3.9"
 
 services:
+  # =========================
+  # PostgreSQL
+  # =========================
   db:
     image: postgres:16-alpine
-    container_name: eoms_db
-    environment:
-      POSTGRES_DB: ${DB_NAME:-eoms}
-      POSTGRES_USER: ${DB_USER:-eoms}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    container_name: eoms-postgres
+    restart: always
+    env_file:
+      - ./db/.env
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-eoms}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-eoms}"]
       interval: 10s
       timeout: 5s
-      retries: 5
-    networks:
-      - eoms_network
+      retries: 10
+      start_period: 60s
 
+  # =========================
+  # Redis
+  # =========================
   redis:
-    image: redis:7-alpine
-    container_name: eoms_redis
-    restart: unless-stopped
+    image: redis:alpine
+    container_name: eoms-redis
+    restart: always
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - eoms_network
 
+  # =========================
+  # Backend (Django + Gunicorn)
+  # =========================
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
-    container_name: eoms_backend
-    command: gunicorn eoms_api.wsgi:application --bind 0.0.0.0:8000 --workers 4 --timeout 300
+    container_name: eoms-backend
+    command: gunicorn eoms_api.wsgi:application --bind 0.0.0.0:8000 --workers ${GUNICORN_WORKERS:-2} --timeout 300
+    env_file:
+      - ./backend/.env
     volumes:
       - media_files:/app/media
       - static_files:/app/staticfiles
-    ports:
-      - "127.0.0.1:8000:8000"  # Nginx serves public port 8001 and proxies to localhost:8000
-    environment:
-      - DEBUG=False
-      - SECRET_KEY=${SECRET_KEY}
-      - DB_NAME=${DB_NAME:-eoms}
-      - DB_USER=${DB_USER:-eoms}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=db
-      - DB_PORT=5432
-      - REDIS_URL=redis://redis:6379/0
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
-      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
-      - AFRICAS_TALKING_USERNAME=${AFRICAS_TALKING_USERNAME}
-      - AFRICAS_TALKING_API_KEY=${AFRICAS_TALKING_API_KEY}
-      - AFRICAS_TALKING_SENDER_ID=${AFRICAS_TALKING_SENDER_ID}
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - eoms_network
+    restart: always
 
+  # =========================
+  # Celery Worker
+  # =========================
   celery:
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
-    container_name: eoms_celery
-    command: celery -A eoms_api worker --loglevel=info --concurrency=4
-    environment:
-      - DEBUG=False
-      - SECRET_KEY=${SECRET_KEY}
-      - DB_NAME=${DB_NAME:-eoms}
-      - DB_USER=${DB_USER:-eoms}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=db
-      - DB_PORT=5432
-      - REDIS_URL=redis://redis:6379/0
-      - AFRICAS_TALKING_USERNAME=${AFRICAS_TALKING_USERNAME}
-      - AFRICAS_TALKING_API_KEY=${AFRICAS_TALKING_API_KEY}
-      - AFRICAS_TALKING_SENDER_ID=${AFRICAS_TALKING_SENDER_ID}
+    container_name: eoms-celery
+    command: celery -A eoms_api worker --loglevel=info --concurrency=${CELERY_CONCURRENCY:-1}
+    env_file:
+      - ./backend/.env
     depends_on:
       - db
       - redis
       - backend
-    restart: unless-stopped
-    networks:
-      - eoms_network
+    restart: always
 
+  # =========================
+  # Celery Beat (Scheduler)
+  # =========================
   celery-beat:
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
-    container_name: eoms_celery_beat
-    command: celery -A eoms_api beat --loglevel=info
-    environment:
-      - DEBUG=False
-      - SECRET_KEY=${SECRET_KEY}
-      - DB_NAME=${DB_NAME:-eoms}
-      - DB_USER=${DB_USER:-eoms}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=db
-      - DB_PORT=5432
-      - REDIS_URL=redis://redis:6379/0
-      - AFRICAS_TALKING_USERNAME=${AFRICAS_TALKING_USERNAME}
-      - AFRICAS_TALKING_API_KEY=${AFRICAS_TALKING_API_KEY}
-      - AFRICAS_TALKING_SENDER_ID=${AFRICAS_TALKING_SENDER_ID}
+    container_name: eoms-celery-beat
+    command: celery -A eoms_api beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    env_file:
+      - ./backend/.env
     depends_on:
       - db
       - redis
       - backend
-    restart: unless-stopped
-    networks:
-      - eoms_network
+    restart: always
 
-  # Frontend is served via Nginx on VPS, not as a container
-  # Nginx configuration is handled by deploy_frontend_to_vps.ps1 script
+  # =========================
+  # Frontend (React build served by Nginx)
+  # =========================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: eoms-frontend
+    restart: always
+
+  # =========================
+  # Reverse Proxy (NGINX)
+  # =========================
+  nginx:
+    image: nginx:latest
+    container_name: eoms-nginx
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - static_files:/var/www/static
+      - media_files:/var/www/media
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+      - frontend
+    restart: always
 
 volumes:
   postgres_data:
   media_files:
   static_files:
-
-networks:
-  eoms_network:
-    driver: bridge

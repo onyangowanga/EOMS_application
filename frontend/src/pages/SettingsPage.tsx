@@ -11,28 +11,51 @@ import {
   MenuItem,
   Divider,
   Alert,
+  CircularProgress,
 } from '@mui/material';
 import { Save } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
+import PWAInstallButton from '../components/PWAInstallButton';
+import { authService } from '../services/auth.service';
 
 /**
  * Settings Page - User Account Module
  * User preferences and account settings
  */
 const SettingsPage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const [formData, setFormData] = useState({
     fullName: user?.full_name || '',
     email: user?.email || '',
     phone: user?.phone || '',
-    preferredOTPMethod: 'sms',
+    preferredOTPMethod: localStorage.getItem('preferred_otp_method') || 'sms',
   });
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  const handleSave = () => {
-    // TODO: Implement save functionality
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+  const handleSave = async () => {
+    if (!user) return;
+
+    setSaving(true);
+    setError('');
+
+    try {
+      const updatedUser = await authService.updateProfile({
+        full_name: formData.fullName,
+        email: formData.email,
+      });
+
+      updateUser(updatedUser);
+      localStorage.setItem('preferred_otp_method', formData.preferredOTPMethod);
+
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (saveError: any) {
+      setError(saveError?.response?.data?.error || 'Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -99,9 +122,25 @@ const SettingsPage: React.FC = () => {
           </Alert>
         )}
 
-        <Button variant="contained" startIcon={<Save />} onClick={handleSave}>
-          Save Changes
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
+
+        <Button variant="contained" startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <Save />} onClick={handleSave} disabled={saving}>
+          {saving ? 'Saving...' : 'Save Changes'}
         </Button>
+      </Paper>
+
+      <Paper sx={{ p: 3, maxWidth: 600, mt: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          App Installation
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Install EOMS on this device to launch it like a native app — no app store required.
+        </Typography>
+        <PWAInstallButton fullWidth showHelperText size="medium" />
       </Paper>
     </Box>
   );

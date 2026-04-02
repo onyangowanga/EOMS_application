@@ -9,12 +9,16 @@ class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model"""
 
     roles = serializers.ListField(child=serializers.CharField(), required=False)
+    has_password = serializers.SerializerMethodField()
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'full_name', 'phone', 'email', 'role', 'roles', 'is_active', 
+        fields = ['id', 'username', 'full_name', 'phone', 'email', 'role', 'roles', 'has_password', 'is_active', 
                   'is_verified', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_has_password(self, obj):
+        return obj.has_usable_password()
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
@@ -40,7 +44,9 @@ class UserCreateSerializer(serializers.ModelSerializer):
         user = User.objects.create(**validated_data)
         if password:
             user.set_password(password)
-            user.save()
+        else:
+            user.set_unusable_password()
+        user.save()
         return user
 
 
@@ -54,11 +60,36 @@ class LoginSerializer(serializers.Serializer):
     )
 
 
+class PasswordLoginSerializer(serializers.Serializer):
+    """Serializer for password login - accepts email, username, or phone."""
+
+    identifier = serializers.CharField(max_length=255, help_text="Email, username, or phone number")
+    password = serializers.CharField(write_only=True)
+
+
 class VerifyOTPSerializer(serializers.Serializer):
     """Serializer for OTP verification - accepts identifier (phone/email) and OTP code"""
     
     identifier = serializers.CharField(max_length=255, help_text="Phone number or email used for OTP")
     otp_code = serializers.CharField(max_length=6)
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    """Request password reset OTP via email or SMS."""
+
+    identifier = serializers.CharField(max_length=255, help_text="Email, username, or phone")
+    delivery_method = serializers.ChoiceField(
+        choices=['sms', 'email'],
+        help_text="Choose password reset OTP delivery method: 'sms' or 'email'"
+    )
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    """Confirm password reset with OTP and new password."""
+
+    identifier = serializers.CharField(max_length=255, help_text="Email, username, or phone")
+    otp_code = serializers.CharField(max_length=6)
+    new_password = serializers.CharField(min_length=8, write_only=True)
 
 
 class ChangePasswordSerializer(serializers.Serializer):

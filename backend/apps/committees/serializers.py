@@ -79,6 +79,7 @@ class CommitteeListSerializer(serializers.ModelSerializer):
     committee_type_display = serializers.CharField(source='get_committee_type_display', read_only=True)
     lead_name = serializers.CharField(source='lead.get_full_name', read_only=True, allow_null=True)
     member_count = serializers.SerializerMethodField()
+    task_count = serializers.SerializerMethodField()
     
     class Meta:
         model = Committee
@@ -86,11 +87,14 @@ class CommitteeListSerializer(serializers.ModelSerializer):
             'id', 'event', 'event_name', 'name', 'is_main',
             'committee_type', 'committee_type_display',
             'lead_name', 'deadline', 'budget_allocation',
-            'member_count'
+            'member_count', 'task_count'
         ]
     
     def get_member_count(self, obj):
         return obj.members.count()
+
+    def get_task_count(self, obj):
+        return obj.tasks.count() if hasattr(obj, 'tasks') else 0
 
 
 class CommitteeCreateSerializer(serializers.ModelSerializer):

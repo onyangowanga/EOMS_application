@@ -6,6 +6,7 @@ import {
   useTheme,
 } from '@mui/material/styles';
 import {
+  Button,
   AppBar,
   Chip,
   Box,
@@ -19,6 +20,9 @@ import {
   ListItemText,
   Toolbar,
   Typography,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
   Avatar,
   Menu,
   MenuItem,
@@ -26,8 +30,9 @@ import {
 } from '@mui/material';
 import {
   Menu as MenuIcon,
+  ArrowBack,
+  Home,
   Dashboard,
-  Event as EventIcon,
   Group,
   Assignment,
   AttachMoney,
@@ -41,6 +46,9 @@ import {
   CheckCircle as ApprovalIcon,
   Notifications,
   Settings,
+  HelpOutline,
+  ExpandMore,
+  Close,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { eventService } from '../services/event.service';
@@ -54,6 +62,84 @@ interface MenuItem {
   path: string;
   section?: string; // Optional section header
 }
+
+interface HelpSection {
+  title: string;
+  summary: string;
+  bullets: string[];
+}
+
+const helpSections: HelpSection[] = [
+  {
+    title: 'Event Dashboard',
+    summary: 'Get a quick event-wide status view.',
+    bullets: [
+      'See operational progress and financial progress in one place.',
+      'Review subcommittee activity, cluster mobilisation, and pending approvals.',
+      'Use this page first to identify overdue or blocked work.',
+    ],
+  },
+  {
+    title: 'Committee Members',
+    summary: 'Manage users and responsibilities.',
+    bullets: [
+      'Add members and assign roles such as Chair, Secretary, and Treasurer.',
+      'Attach members to role committees and subcommittees.',
+      'Update assignments whenever responsibilities change.',
+    ],
+  },
+  {
+    title: 'Subcommittees and Tasks',
+    summary: 'Track daily operational execution.',
+    bullets: [
+      'Create tasks with assignees, deadlines, and progress updates.',
+      'Use status and priority to track urgency and completion.',
+      'Optional estimated cost helps align operations with budget planning.',
+    ],
+  },
+  {
+    title: 'Budget, Requisitions, and Treasury',
+    summary: 'Handle finance workflows from planning to payment.',
+    bullets: [
+      'Review and approve budget items before spending.',
+      'Process requisitions through required approvers.',
+      'Treasury records payments and confirms submitted collections.',
+    ],
+  },
+  {
+    title: 'Clusters and Mobilisation',
+    summary: 'Capture fundraising activity and submissions.',
+    bullets: [
+      'Cluster leads record pledges and contributions.',
+      'Submit funds for treasury confirmation and auditing.',
+      'Monitor mobilisation performance across clusters.',
+    ],
+  },
+  {
+    title: 'Reports',
+    summary: 'Generate insights for decision-making.',
+    bullets: [
+      'Use summary, operations, finance, and mobilisation reports.',
+      'Filter by event and committee context where supported.',
+      'Export output for stakeholder sharing where available.',
+    ],
+  },
+];
+
+const faqs = [
+  {
+    q: 'Why can I not see some modules?',
+    a: 'Access is role-based. Ask an administrator to review your role permissions.',
+  },
+  {
+    q: 'Why are my updates not immediately visible?',
+    a: 'Refresh the page. Some dashboards and reports update after data refetch.',
+  },
+  {
+    q: 'I am not receiving OTP.',
+    a: 'Check your contact details and switch OTP method in Settings if needed.',
+  },
+];
 
 // Helper to extract eventId from path
 const getEventIdFromPath = (pathname: string): string | null => {
@@ -129,6 +215,7 @@ const Layout: React.FC = () => {
   const theme = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -159,6 +246,14 @@ const Layout: React.FC = () => {
   const handleLogout = () => {
     logout();
     navigate('/login');
+  };
+
+  const openHelpCenter = () => {
+    setHelpOpen(true);
+  };
+
+  const closeHelpCenter = () => {
+    setHelpOpen(false);
   };
 
   const drawer = (
@@ -202,7 +297,7 @@ const Layout: React.FC = () => {
               </ListItem>
             )}
             <ListItem disablePadding>
-              <ListItemButton selected={location.pathname === item.path} onClick={() => navigate(item.path)}>
+              <ListItemButton selected={location.pathname === item.path} onClick={() => { navigate(item.path); setMobileOpen(false); }}>
                 <ListItemIcon sx={{ color: location.pathname === item.path ? 'primary.main' : 'text.secondary', minWidth: 42 }}>
                   {item.icon}
                 </ListItemIcon>
@@ -221,21 +316,27 @@ const Layout: React.FC = () => {
           </Typography>
         </ListItem>
         <ListItem disablePadding>
-          <ListItemButton onClick={() => navigate('/notifications')}>
+          <ListItemButton onClick={() => { navigate('/notifications'); setMobileOpen(false); }}>
             <ListItemIcon><Notifications /></ListItemIcon>
             <ListItemText primary="Notifications" />
           </ListItemButton>
         </ListItem>
         <ListItem disablePadding>
-          <ListItemButton onClick={() => navigate('/profile')}>
+          <ListItemButton onClick={() => { navigate('/profile'); setMobileOpen(false); }}>
             <ListItemIcon><AccountCircle /></ListItemIcon>
             <ListItemText primary="My Profile" />
           </ListItemButton>
         </ListItem>
         <ListItem disablePadding>
-          <ListItemButton onClick={() => navigate('/settings')}>
+          <ListItemButton onClick={() => { navigate('/settings'); setMobileOpen(false); }}>
             <ListItemIcon><Settings /></ListItemIcon>
             <ListItemText primary="Settings" />
+          </ListItemButton>
+        </ListItem>
+        <ListItem disablePadding>
+          <ListItemButton onClick={() => { setMobileOpen(false); openHelpCenter(); }}>
+            <ListItemIcon><HelpOutline /></ListItemIcon>
+            <ListItemText primary="Help Center" />
           </ListItemButton>
         </ListItem>
       </List>
@@ -285,6 +386,25 @@ const Layout: React.FC = () => {
             </Box>
           </Box>
           <IconButton
+            color="primary"
+            onClick={() => navigate(-1)}
+            sx={{ mr: 0.5 }}
+            aria-label="Go back"
+          >
+            <ArrowBack />
+          </IconButton>
+          <IconButton
+            color="primary"
+            onClick={() => navigate('/dashboard')}
+            sx={{ mr: 1 }}
+            aria-label="Go to home"
+          >
+            <Home />
+          </IconButton>
+          <IconButton onClick={openHelpCenter} color="primary" sx={{ mr: 1 }} aria-label="Open help center">
+            <HelpOutline />
+          </IconButton>
+          <IconButton
             onClick={handleProfileMenuOpen}
             color="primary"
           >
@@ -311,6 +431,12 @@ const Layout: React.FC = () => {
                 <AccountCircle fontSize="small" />
               </ListItemIcon>
               Profile
+            </MenuItem>
+            <MenuItem onClick={() => { handleProfileMenuClose(); openHelpCenter(); }}>
+              <ListItemIcon>
+                <HelpOutline fontSize="small" />
+              </ListItemIcon>
+              Help Center
             </MenuItem>
             <MenuItem onClick={handleLogout}>
               <ListItemIcon>
@@ -368,6 +494,78 @@ const Layout: React.FC = () => {
         <Toolbar />
         <Outlet />
       </Box>
+
+      <Drawer
+        anchor="right"
+        open={helpOpen}
+        onClose={closeHelpCenter}
+        PaperProps={{
+          sx: {
+            width: { xs: '100%', sm: 500 },
+            borderLeft: `1px solid ${alpha(theme.palette.divider, 0.75)}`,
+          },
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2, py: 1.5, borderBottom: `1px solid ${alpha(theme.palette.divider, 0.7)}` }}>
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 700 }}>
+              EOMS Help Center
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Quick guide to common modules and workflows.
+            </Typography>
+          </Box>
+          <IconButton onClick={closeHelpCenter} size="small" aria-label="Close help center">
+            <Close />
+          </IconButton>
+        </Box>
+
+        <Box sx={{ p: 2, overflowY: 'auto' }}>
+          {helpSections.map((section) => (
+            <Accordion key={section.title} disableGutters>
+              <AccordionSummary expandIcon={<ExpandMore />}>
+                <Box>
+                  <Typography sx={{ fontWeight: 700 }}>{section.title}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {section.summary}
+                  </Typography>
+                </Box>
+              </AccordionSummary>
+              <AccordionDetails>
+                <List dense>
+                  {section.bullets.map((point) => (
+                    <ListItem key={point} sx={{ py: 0.25 }}>
+                      <ListItemText primary={point} />
+                    </ListItem>
+                  ))}
+                </List>
+              </AccordionDetails>
+            </Accordion>
+          ))}
+
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="h6" sx={{ mb: 1, fontWeight: 700 }}>
+              Frequently Asked Questions
+            </Typography>
+            {faqs.map((item) => (
+              <Accordion key={item.q} disableGutters>
+                <AccordionSummary expandIcon={<ExpandMore />}>
+                  <Typography sx={{ fontWeight: 600 }}>{item.q}</Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Typography variant="body2" color="text.secondary">
+                    {item.a}
+                  </Typography>
+                </AccordionDetails>
+              </Accordion>
+            ))}
+          </Box>
+        </Box>
+
+        <Box sx={{ p: 2, borderTop: `1px solid ${alpha(theme.palette.divider, 0.7)}`, display: 'flex', justifyContent: 'flex-end' }}>
+          <Button variant="contained" onClick={closeHelpCenter}>Close</Button>
+        </Box>
+      </Drawer>
     </Box>
   );
 };

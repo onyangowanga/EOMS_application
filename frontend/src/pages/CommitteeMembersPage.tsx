@@ -292,7 +292,7 @@ const MemberCard: React.FC<MemberCardProps> = ({
         <Tooltip title="View Profile">
           <IconButton size="small" color="primary" onClick={onViewProfile}><Visibility fontSize="small" /></IconButton>
         </Tooltip>
-        <Tooltip title="Edit Member">
+        <Tooltip title="Change Event Role">
           <IconButton size="small" color="info" onClick={onEdit}><Edit fontSize="small" /></IconButton>
         </Tooltip>
         <Tooltip title="Assign to Subcommittee">
@@ -342,12 +342,15 @@ const EditMemberModal: React.FC<EditMemberModalProps> = ({ open, member, eventId
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>Edit Member</DialogTitle>
+      <DialogTitle>Change Event Role</DialogTitle>
       <DialogContent>
         <Box sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <Typography variant="body2" color="text.secondary">
             {member ? getMemberName(member) : ''}
           </Typography>
+          <Alert severity="info">
+            Choose the member's event-level role. This controls their permissions across the event.
+          </Alert>
           <FormControl fullWidth>
             <InputLabel>Event Role</InputLabel>
             <Select value={role} onChange={(e) => setRole(e.target.value)} label="Event Role">
@@ -473,7 +476,7 @@ const CommitteeMembersPage: React.FC = () => {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
 
   // UI state
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -491,6 +494,8 @@ const CommitteeMembersPage: React.FC = () => {
   const [profileMember, setProfileMember] = useState<EventMember | null>(null);
   const [editMember, setEditMember] = useState<EventMember | null>(null);
   const [assignMember, setAssignMember] = useState<EventMember | null>(null);
+  const [teamLeadDialogOpen, setTeamLeadDialogOpen] = useState(false);
+  const [selectedTeamLeadMemberId, setSelectedTeamLeadMemberId] = useState<string>('');
 
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
@@ -510,7 +515,13 @@ const CommitteeMembersPage: React.FC = () => {
   });
 
   const currentEventRole = (eventMembers || []).find((member: any) => member.user_details?.id === user?.id)?.role;
-  const canCreateNewMember = ['EVENT_OWNER', 'CHAIRMAN', 'SECRETARY'].includes(currentEventRole || '');
+  const canManageRoles = hasRole('executive_admin') || ['EVENT_OWNER', 'CHAIRMAN', 'SECRETARY', 'TREASURER'].includes(currentEventRole || '');
+  const canCreateNewMember = canManageRoles;
+
+  const eligibleTeamLeadMembers = useMemo(
+    () => (eventMembers || []).filter((m) => m.role !== 'EVENT_OWNER'),
+    [eventMembers]
+  );
 
   const { data: allCommitteeMembers, isLoading: loadingCommitteeMembers } = useQuery({
     queryKey: ['all-committee-members', eventId, committees?.map((c) => c.id).join(',')],
@@ -601,6 +612,18 @@ const CommitteeMembersPage: React.FC = () => {
       setDeleteDialogOpen(false);
       setMemberToDelete(null);
       setProfileMember(null);
+    },
+  });
+
+  const assignTeamLeadMutation = useMutation({
+    mutationFn: async (memberId: string) => {
+      await apiClient.patch(`/events/${eventId}/members/${memberId}/`, { role: 'TEAM_LEAD' });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['event-members', eventId] });
+      setSuccessMessage('Team lead assigned successfully!');
+      setTeamLeadDialogOpen(false);
+      setSelectedTeamLeadMemberId('');
     },
   });
 
@@ -710,6 +733,23 @@ const CommitteeMembersPage: React.FC = () => {
         </Button>
       </Box>
 
+      <Alert severity="info" sx={{ mb: 2 }}>
+        <strong>Role assignment:</strong> Super Admin and officials (Event Owner, Chair, Secretary, Treasurer) can change roles.
+        Use <strong>Edit Member</strong> to assign roles like Chair/Secretary/Treasurer/Member, or use
+        <strong> Assign Team Lead</strong> to promote an existing member quickly.
+      </Alert>
+
+      <Box display="flex" gap={1} flexWrap="wrap" sx={{ mb: 2 }}>
+        <Button
+          variant="outlined"
+          startIcon={<Star />}
+          onClick={() => setTeamLeadDialogOpen(true)}
+          disabled={!canManageRoles || eligibleTeamLeadMembers.length === 0}
+        >
+          Assign Team Lead
+        </Button>
+      </Box>
+
       {/* Stats */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {[
@@ -799,9 +839,9 @@ const CommitteeMembersPage: React.FC = () => {
                   member={member}
                   committeeNames={getMemberCommittees(member)}
                   onViewProfile={() => setProfileMember(member)}
-                  onEdit={() => setEditMember(member)}
+                  onEdit={() => canManageRoles && setEditMember(member)}
                   onAssign={() => setAssignMember(member)}
-                  onRemove={() => handleDeleteClick(member)}
+                  onRemove={() => canManageRoles && handleDeleteClick(member)}
                 />
               </Grid>
             ))}
@@ -892,8 +932,8 @@ const CommitteeMembersPage: React.FC = () => {
                               <Visibility fontSize="small" />
                             </IconButton>
                           </Tooltip>
-                          <Tooltip title="Edit Member">
-                            <IconButton size="small" color="info" onClick={() => setEditMember(member)}>
+                          <Tooltip title="Change Event Role">
+                            <IconButton size="small" color="info" onClick={() => setEditMember(member)} disabled={!canManageRoles}>
                               <Edit fontSize="small" />
                             </IconButton>
                           </Tooltip>
@@ -903,7 +943,7 @@ const CommitteeMembersPage: React.FC = () => {
                             </IconButton>
                           </Tooltip>
                           <Tooltip title="Remove from Event">
-                            <IconButton size="small" color="error" onClick={() => handleDeleteClick(member)}>
+                            <IconButton size="small" color="error" onClick={() => handleDeleteClick(member)} disabled={!canManageRoles}>
                               <Delete fontSize="small" />
                             </IconButton>
                           </Tooltip>
@@ -940,7 +980,7 @@ const CommitteeMembersPage: React.FC = () => {
 
       {/* Edit Member Modal */}
       <EditMemberModal
-        open={!!editMember}
+        open={!!editMember && canManageRoles}
         member={editMember}
         eventId={eventId!}
         onClose={() => setEditMember(null)}
@@ -1068,6 +1108,46 @@ const CommitteeMembersPage: React.FC = () => {
             }
           >
             {addMemberMutation.isPending ? 'Adding...' : 'Add Member'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={teamLeadDialogOpen} onClose={() => setTeamLeadDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Assign Team Lead</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Typography variant="body2" color="text.secondary">
+              Select an existing event member to assign the Team Lead role.
+            </Typography>
+            <FormControl fullWidth>
+              <InputLabel>Member</InputLabel>
+              <Select
+                value={selectedTeamLeadMemberId}
+                onChange={(e) => setSelectedTeamLeadMemberId(String(e.target.value))}
+                label="Member"
+              >
+                {eligibleTeamLeadMembers.map((member) => (
+                  <MenuItem key={member.id} value={member.id}>
+                    {getMemberName(member)} ({roleLabel(member.role)})
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {assignTeamLeadMutation.isError && (
+              <Alert severity="error">
+                {(assignTeamLeadMutation.error as any)?.response?.data?.detail || 'Failed to assign team lead'}
+              </Alert>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTeamLeadDialogOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={() => assignTeamLeadMutation.mutate(selectedTeamLeadMemberId)}
+            disabled={!selectedTeamLeadMemberId || assignTeamLeadMutation.isPending || !canManageRoles}
+          >
+            {assignTeamLeadMutation.isPending ? 'Assigning...' : 'Assign Team Lead'}
           </Button>
         </DialogActions>
       </Dialog>

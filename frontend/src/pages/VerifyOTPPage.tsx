@@ -27,9 +27,12 @@ const VerifyOTPPage: React.FC = () => {
     setLoading(true);
 
     try {
-      await verifyOTP(identifier, otpCode);
-      // Navigate to dashboard after successful verification
-      navigate('/dashboard');
+      const user = await verifyOTP(identifier, otpCode);
+      if (!user.has_password) {
+        navigate('/set-password');
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err: any) {
       setError(err.response?.data?.error || 'Invalid OTP code');
     } finally {

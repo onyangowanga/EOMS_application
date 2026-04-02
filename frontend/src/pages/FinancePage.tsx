@@ -27,12 +27,16 @@ import {
   Grid,
   Card,
   CardContent,
+  IconButton,
 } from '@mui/material';
 import {
   Add as AddIcon,
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
   AccountBalance as AccountBalanceIcon,
+  AutoFixHigh as AutoParseIcon,
+  Upload as UploadIcon,
+  DeleteOutline as DeleteOutlineIcon,
 } from '@mui/icons-material';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -41,18 +45,36 @@ import { committeeService } from '../services/committee.service';
 import { eventService } from '../services/event.service';
 import type { CollectionCreate, ExpenseCreate } from '../types/index';
 import { useAuth } from '../contexts/AuthContext';
+import { parseMpesaMessage } from '../utils/mpesa';
+
+interface ParsedPaymentEntry {
+  payer_name: string;
+  payer_phone?: string;
+  amount: number;
+  reference_number?: string;
+}
+
+type CollectionFormState = Partial<CollectionCreate> & {
+  source_type?: 'GENERAL' | 'CLUSTER';
+  cluster?: number;
+};
 
 const FinancePage: React.FC = () => {
   const { eventId } = useParams<{ eventId?: string }>();
-  const { user, hasRole } = useAuth();
+  const { hasRole } = useAuth();
   const queryClient = useQueryClient();
   const [currentTab, setCurrentTab] = useState(0);
   const [openCollectionDialog, setOpenCollectionDialog] = useState(false);
   const [openExpenseDialog, setOpenExpenseDialog] = useState(false);
   const [error, setError] = useState('');
+  const [mpesaRawMessage, setMpesaRawMessage] = useState('');
+  const [batchRawMessages, setBatchRawMessages] = useState('');
+  const [batchParsedEntries, setBatchParsedEntries] = useState<ParsedPaymentEntry[]>([]);
   
-  const [collectionData, setCollectionData] = useState<Partial<CollectionCreate>>({
+  const [collectionData, setCollectionData] = useState<CollectionFormState>({
     committee_id: undefined,
+    source_type: 'GENERAL',
+    cluster: undefined,
     payer_name: '',
     payer_phone: '',
     amount: 0,
@@ -82,6 +104,12 @@ const FinancePage: React.FC = () => {
   const { data: committees } = useQuery({
     queryKey: ['committees'],
     queryFn: committeeService.getAll,
+  });
+
+  const { data: clusters } = useQuery<any[]>({
+    queryKey: ['clusters', eventId],
+    queryFn: () => (eventId ? eventService.getEventClusters(eventId) : Promise.resolve([])),
+    enabled: !!eventId,
   });
 
   const normalizedCollections = Array.isArray(collections)
@@ -142,12 +170,33 @@ const FinancePage: React.FC = () => {
   const resetCollectionForm = () => {
     setCollectionData({
       committee_id: undefined,
+      source_type: 'GENERAL',
+      cluster: undefined,
       payer_name: '',
       payer_phone: '',
       amount: 0,
       channel: 'MPESA',
       reference_number: '',
     });
+    setError('');
+    setMpesaRawMessage('');
+  };
+
+  const handleParseMpesaMessage = () => {
+    const parsed = parseMpesaMessage(mpesaRawMessage);
+    if (!parsed) {
+      setError('Could not parse M-Pesa message. Please paste a full transaction SMS.');
+      return;
+    }
+
+    setCollectionData((prev) => ({
+      ...prev,
+      payer_name: parsed.contributorName || prev.payer_name,
+      payer_phone: parsed.contributorPhone || prev.payer_phone,
+      amount: parsed.amount ?? prev.amount,
+      channel: 'MPESA',
+      reference_number: parsed.transactionReference || prev.reference_number,
+    }));
     setError('');
   };
 
@@ -167,7 +216,107 @@ const FinancePage: React.FC = () => {
       setError('Please fill in all required fields');
       return;
     }
-    createCollectionMutation.mutate(collectionData as CollectionCreate);
+
+    if ((collectionData as any).source_type === 'CLUSTER' && !(collectionData as any).cluster) {
+      setError('Please select the cluster unit for cluster collections');
+      return;
+    }
+
+    const payload: any = {
+      ...collectionData,
+      event: eventId,
+      source_type: (collectionData as any).source_type || 'GENERAL',
+      cluster: (collectionData as any).source_type === 'CLUSTER' ? (collectionData as any).cluster : undefined,
+    };
+
+    createCollectionMutation.mutate(payload);
+  };
+
+  const handleParseBatchMessages = () => {
+    const lines = batchRawMessages
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const parsedEntries = lines
+      .map((line) => parseMpesaMessage(line))
+      .filter((parsed): parsed is NonNullable<typeof parsed> => !!parsed && !!parsed.contributorName && typeof parsed.amount === 'number')
+      .map((parsed) => ({
+        payer_name: parsed.contributorName!,
+        payer_phone: parsed.contributorPhone,
+        amount: parsed.amount!,
+        reference_number: parsed.transactionReference,
+      }));
+
+    setBatchParsedEntries(parsedEntries);
+
+    if (parsedEntries.length === 0) {
+      setError('No valid M-Pesa messages were parsed. Paste one message per line.');
+      return;
+    }
+
+    setError('');
+  };
+
+  const handleImportBatchMessages = async () => {
+    if (!collectionData.committee_id) {
+      setError('Select committee first before importing parsed entries.');
+      return;
+    }
+
+    if (batchParsedEntries.length === 0) {
+      setError('No parsed entries to import.');
+      return;
+    }
+
+    const requests = batchParsedEntries.map((entry) =>
+      financeService.createCollection({
+        event: eventId,
+        committee_id: collectionData.committee_id,
+        source_type: 'GENERAL',
+        payer_name: entry.payer_name,
+        payer_phone: entry.payer_phone || '',
+        amount: entry.amount,
+        channel: 'MPESA',
+        reference_number: entry.reference_number || '',
+      })
+    );
+
+    const results = await Promise.allSettled(requests);
+    const failed = results.filter((r) => r.status === 'rejected').length;
+
+    queryClient.invalidateQueries({ queryKey: ['collections', eventId] });
+    queryClient.invalidateQueries({ queryKey: ['finance-summary'] });
+
+    if (failed > 0) {
+      setError(`${failed} entries failed to import. The rest were saved.`);
+    } else {
+      setError('');
+    }
+
+    setBatchParsedEntries([]);
+    setBatchRawMessages('');
+  };
+
+  const handleUpdateParsedEntry = (
+    index: number,
+    field: keyof ParsedPaymentEntry,
+    value: string | number
+  ) => {
+    setBatchParsedEntries((prev) =>
+      prev.map((entry, i) =>
+        i === index
+          ? {
+              ...entry,
+              [field]: field === 'amount' ? Number(value) || 0 : value,
+            }
+          : entry
+      )
+    );
+  };
+
+  const handleRemoveParsedEntry = (index: number) => {
+    setBatchParsedEntries((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleCreateExpense = () => {
@@ -286,6 +435,107 @@ const FinancePage: React.FC = () => {
       {/* Collections Tab */}
       {currentTab === 0 && (
         <Box>
+          <Paper sx={{ p: 2, mb: 2 }}>
+            <Typography variant="h6" sx={{ mb: 1 }}>Direct M-Pesa Bulk Import</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Paste direct-payment M-Pesa messages (one message per line), then parse and import all as direct receipts.
+            </Typography>
+            <TextField
+              label="Paste M-Pesa Messages"
+              multiline
+              minRows={4}
+              value={batchRawMessages}
+              onChange={(e) => setBatchRawMessages(e.target.value)}
+              placeholder="One M-Pesa message per line"
+              fullWidth
+            />
+            <Box display="flex" gap={1} mt={2} flexWrap="wrap">
+              <Button variant="outlined" startIcon={<AutoParseIcon />} onClick={handleParseBatchMessages}>
+                Parse Messages
+              </Button>
+              <Button
+                variant="contained"
+                startIcon={<UploadIcon />}
+                onClick={handleImportBatchMessages}
+                disabled={batchParsedEntries.length === 0}
+              >
+                Import Parsed ({batchParsedEntries.length})
+              </Button>
+            </Box>
+
+            {batchParsedEntries.length > 0 && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Preview and Edit Parsed Entries
+                </Typography>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ width: 60 }}>#</TableCell>
+                        <TableCell>Name</TableCell>
+                        <TableCell>Phone</TableCell>
+                        <TableCell sx={{ width: 160 }}>Amount</TableCell>
+                        <TableCell>Reference</TableCell>
+                        <TableCell align="right" sx={{ width: 80 }}>Action</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {batchParsedEntries.map((entry, index) => (
+                        <TableRow key={`${entry.reference_number || 'entry'}-${index}`}>
+                          <TableCell>{index + 1}</TableCell>
+                          <TableCell>
+                            <TextField
+                              value={entry.payer_name}
+                              size="small"
+                              fullWidth
+                              onChange={(e) => handleUpdateParsedEntry(index, 'payer_name', e.target.value)}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              value={entry.payer_phone || ''}
+                              size="small"
+                              fullWidth
+                              onChange={(e) => handleUpdateParsedEntry(index, 'payer_phone', e.target.value)}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              value={entry.amount}
+                              type="number"
+                              size="small"
+                              fullWidth
+                              onChange={(e) => handleUpdateParsedEntry(index, 'amount', e.target.value)}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              value={entry.reference_number || ''}
+                              size="small"
+                              fullWidth
+                              onChange={(e) => handleUpdateParsedEntry(index, 'reference_number', e.target.value)}
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            <IconButton
+                              color="error"
+                              size="small"
+                              onClick={() => handleRemoveParsedEntry(index)}
+                              aria-label="remove parsed row"
+                            >
+                              <DeleteOutlineIcon fontSize="small" />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+            )}
+          </Paper>
+
           <Box display="flex" justifyContent="flex-end" mb={2}>
             <Button
               variant="contained"
@@ -446,6 +696,18 @@ const FinancePage: React.FC = () => {
             </Alert>
           )}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+            <TextField
+              label="Paste M-Pesa Message"
+              fullWidth
+              multiline
+              minRows={3}
+              value={mpesaRawMessage}
+              onChange={(e) => setMpesaRawMessage(e.target.value)}
+              placeholder="Paste the full M-Pesa SMS here to auto-fill fields"
+            />
+            <Button variant="outlined" startIcon={<AutoParseIcon />} onClick={handleParseMpesaMessage}>
+              Parse M-Pesa Message
+            </Button>
             <FormControl fullWidth required>
               <InputLabel>Committee</InputLabel>
               <Select
@@ -462,6 +724,41 @@ const FinancePage: React.FC = () => {
                 ))}
               </Select>
             </FormControl>
+            <FormControl fullWidth required>
+              <InputLabel>Source Type</InputLabel>
+              <Select
+                value={(collectionData as any).source_type || 'GENERAL'}
+                onChange={(e) =>
+                  setCollectionData({
+                    ...collectionData,
+                    source_type: e.target.value as any,
+                    cluster: e.target.value === 'CLUSTER' ? (collectionData as any).cluster : undefined,
+                  })
+                }
+                label="Source Type"
+              >
+                <MenuItem value="GENERAL">Direct (Not from Cluster)</MenuItem>
+                <MenuItem value="CLUSTER">Cluster Unit</MenuItem>
+              </Select>
+            </FormControl>
+            {(collectionData as any).source_type === 'CLUSTER' && (
+              <FormControl fullWidth required>
+                <InputLabel>Cluster Unit</InputLabel>
+                <Select
+                  value={(collectionData as any).cluster || ''}
+                  onChange={(e) =>
+                    setCollectionData({ ...collectionData, cluster: e.target.value as any })
+                  }
+                  label="Cluster Unit"
+                >
+                  {(clusters || []).map((cluster: any) => (
+                    <MenuItem key={cluster.id} value={cluster.id}>
+                      {cluster.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
             <TextField
               label="Payer Name"
               fullWidth

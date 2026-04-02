@@ -20,7 +20,7 @@ User = get_user_model()
 
 def _can_manage_event_members(user, event_id):
     roles = resolve_user_roles(user, event_id)
-    return bool(roles.intersection({'chair', 'secretary'}))
+    return bool(roles.intersection({'executive_admin', 'chair', 'secretary', 'treasurer'}))
 
 
 class CommitteeViewSet(viewsets.ModelViewSet):

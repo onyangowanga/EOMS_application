@@ -158,15 +158,6 @@ const SubcommitteeDetailsPage: React.FC = () => {
     enabled: !!eventId && openMemberDialog,
   });
 
-  const { data: allEventMembers } = useQuery({
-    queryKey: ['event-members-role', eventId],
-    queryFn: async () => {
-      if (!eventId) return [];
-      return await eventService.getEventMembers(eventId);
-    },
-    enabled: !!eventId,
-  });
-
   // Fetch expenses/budget items for this committee
   const { data: expenses } = useQuery({
     queryKey: ['committee-expenses', subcommitteeId],
@@ -363,13 +354,26 @@ const SubcommitteeDetailsPage: React.FC = () => {
     );
   }
 
-  const progress = parseFloat(committee.operational_progress || '0');
-  const completionRate = committee.task_count && committee.tasks_completed
-    ? (committee.tasks_completed / committee.task_count) * 100
+  const liveTasks = (tasks || []) as any[];
+  const activeTasks = liveTasks.filter((task) => task.status !== 'CANCELLED');
+  const completedActiveTasks = activeTasks.filter((task) => task.status === 'COMPLETED').length;
+  const totalActiveTasks = activeTasks.length;
+  const fallbackTaskCount = Number(committee.task_count || 0);
+  const totalTasksForOverview = totalActiveTasks || fallbackTaskCount;
+
+  const completionRate = totalTasksForOverview > 0
+    ? (completedActiveTasks / totalTasksForOverview) * 100
     : 0;
 
-  const currentEventRole = allEventMembers?.find((member: any) => member.user_details?.id === user?.id)?.role;
-  const isAdmin = hasRole('executive_admin');
+  const averageTaskProgress = totalActiveTasks > 0
+    ? activeTasks.reduce((sum, task) => {
+        const value = Math.min(Math.max(parseFloat(task.progress_percentage || '0'), 0), 100);
+        return sum + value;
+      }, 0) / totalActiveTasks
+    : null;
+
+  const progress = averageTaskProgress ?? completionRate;
+
   const isTeamLeadForThisCommittee = (members || []).some((member: any) => {
     const memberUserId = member.user?.id ?? member.user_id;
     return memberUserId === user?.id && (member.is_lead || member.role === 'TEAM_LEAD');
@@ -441,7 +445,7 @@ const SubcommitteeDetailsPage: React.FC = () => {
                     <Box display="flex" alignItems="center" justifyContent="space-between">
                       <Box>
                         <Typography variant="h4" color="primary">
-                          {committee.task_count || 0}
+                          {totalTasksForOverview}
                         </Typography>
                         <Typography variant="body2" color="text.secondary">
                           Total Tasks

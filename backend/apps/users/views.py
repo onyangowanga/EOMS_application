@@ -12,7 +12,8 @@ import logging
 from .models import OTP
 from .serializers import (
     UserSerializer, UserCreateSerializer, LoginSerializer,
-    VerifyOTPSerializer, ChangePasswordSerializer
+    VerifyOTPSerializer, ChangePasswordSerializer, PasswordLoginSerializer,
+    PasswordResetRequestSerializer, PasswordResetConfirmSerializer
 )
 from .sms import send_otp_sms
 from .email_service import send_otp_email
@@ -117,6 +118,7 @@ class UserViewSet(viewsets.ModelViewSet):
         otp = OTP.objects.create(
             phone=user.phone if delivery_method == 'sms' else None,
             email=user.email if delivery_method == 'email' else None,
+            purpose='login',
             otp_code=otp_code,
             expires_at=timezone.now() + timedelta(minutes=10)
         )
@@ -137,6 +139,148 @@ class UserViewSet(viewsets.ModelViewSet):
             # Only return OTP in development mode when sending fails
             'otp': otp_code if not sent else None
         }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny], url_path='login/password')
+    def login_password(self, request):
+        """Authenticate using identifier + password and return JWT tokens."""
+        serializer = PasswordLoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        identifier = serializer.validated_data['identifier'].strip()
+        password = serializer.validated_data['password']
+
+        from django.db.models import Q
+
+        # Support login by email, username, or phone.
+        user = User.objects.filter(
+            Q(email__iexact=identifier) | Q(username=identifier) | Q(phone=identifier)
+        ).first()
+
+        if not user or not user.check_password(password):
+            return Response(
+                {'error': 'Invalid credentials'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        if not user.has_usable_password():
+            return Response(
+                {'error': 'Password is not set for this account. Login with OTP and set a password first.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not user.is_active:
+            return Response(
+                {'error': 'Account is disabled'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        refresh = RefreshToken.for_user(user)
+
+        return Response(
+            {
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'user': UserSerializer(user).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny], url_path='password-reset/request')
+    def password_reset_request(self, request):
+        """Request OTP for password reset using email or SMS."""
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        identifier = serializer.validated_data['identifier'].strip()
+        delivery_method = serializer.validated_data['delivery_method']
+
+        from django.db.models import Q
+
+        user = User.objects.filter(
+            Q(email__iexact=identifier) | Q(username=identifier) | Q(phone=identifier)
+        ).first()
+
+        if not user:
+            return Response({'error': 'Account not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if delivery_method == 'email':
+            if not user.email:
+                return Response({'error': 'No email is registered for this account'}, status=status.HTTP_400_BAD_REQUEST)
+            contact = user.email
+        else:
+            if not user.phone:
+                return Response({'error': 'No phone number is registered for this account'}, status=status.HTTP_400_BAD_REQUEST)
+            contact = user.phone
+
+        otp_code = str(random.randint(100000, 999999))
+        OTP.objects.create(
+            phone=user.phone if delivery_method == 'sms' else None,
+            email=user.email if delivery_method == 'email' else None,
+            purpose='password_reset',
+            otp_code=otp_code,
+            expires_at=timezone.now() + timedelta(minutes=10),
+        )
+
+        if delivery_method == 'sms':
+            sent = send_otp_sms(contact, otp_code)
+        else:
+            sent = send_otp_email(contact, otp_code)
+
+        if not sent:
+            logger.warning(f"Failed to send password reset {delivery_method} to {contact}, but OTP created in database")
+
+        return Response({
+            'message': f'Password reset OTP sent via {delivery_method}' if sent else f'OTP generated but {delivery_method} sending failed',
+            'sent': sent,
+            'method': delivery_method,
+            'otp': otp_code if not sent else None,
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny], url_path='password-reset/confirm')
+    def password_reset_confirm(self, request):
+        """Validate reset OTP and set a new password."""
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        identifier = serializer.validated_data['identifier'].strip()
+        otp_code = serializer.validated_data['otp_code']
+        new_password = serializer.validated_data['new_password']
+
+        from django.db.models import Q
+
+        user = User.objects.filter(
+            Q(email__iexact=identifier) | Q(username=identifier) | Q(phone=identifier)
+        ).first()
+
+        if not user:
+            return Response({'error': 'Account not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        otp = OTP.objects.filter(
+            Q(phone=user.phone) | Q(email=user.email),
+            purpose='password_reset',
+            otp_code=otp_code,
+            is_verified=False,
+        ).order_by('-created_at').first()
+
+        if not otp:
+            return Response({'error': 'Invalid OTP'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not otp.is_valid():
+            return Response({'error': 'OTP has expired'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(new_password)
+        user.save(update_fields=['password'])
+
+        otp.is_verified = True
+        otp.save(update_fields=['is_verified'])
+
+        OTP.objects.filter(
+            Q(phone=user.phone) | Q(email=user.email),
+            purpose='password_reset',
+            is_verified=False,
+        ).update(is_verified=True)
+
+        return Response({'message': 'Password reset successful'}, status=status.HTTP_200_OK)
     
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def verify_otp(self, request):
@@ -165,6 +309,7 @@ class UserViewSet(viewsets.ModelViewSet):
         try:
             otp = OTP.objects.filter(
                 Q(phone=user.phone) | Q(email=user.email),
+                purpose='login',
                 otp_code=otp_code,
                 is_verified=False
             ).latest('created_at')
@@ -194,6 +339,31 @@ class UserViewSet(viewsets.ModelViewSet):
             'access': str(refresh.access_token),
             'refresh': str(refresh),
             'user': UserSerializer(user).data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated], url_path='set-initial-password')
+    def set_initial_password(self, request):
+        """Set initial password for users who only used OTP login and do not have a usable password yet."""
+        new_password = request.data.get('new_password')
+        confirm_password = request.data.get('confirm_password')
+
+        if not new_password or len(new_password) < 8:
+            return Response({'error': 'Password must be at least 8 characters long'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if new_password != confirm_password:
+            return Response({'error': 'Passwords do not match'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+
+        if user.has_usable_password():
+            return Response({'error': 'Password is already set for this account'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(new_password)
+        user.save(update_fields=['password'])
+
+        return Response({
+            'message': 'Password set successfully',
+            'user': UserSerializer(user).data,
         }, status=status.HTTP_200_OK)
     
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])

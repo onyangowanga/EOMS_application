@@ -3,6 +3,7 @@ import {
   Box,
   Typography,
   Button,
+  Paper,
   Card,
   CardContent,
   Grid,
@@ -12,6 +13,7 @@ import {
   AvatarGroup,
   Tooltip,
   Skeleton,
+  LinearProgress,
 } from '@mui/material';
 import { Add, Group, Assignment, ArrowForward, Star } from '@mui/icons-material';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -58,18 +60,77 @@ const SubcommitteesListPage: React.FC = () => {
     enabled: !!committees && committees.length > 0,
   });
 
+  const taskBasedCommittees =
+    ((committeesWithMembers || committees)?.filter((committee: any) => isTaskBasedCommittee(committee)) || []);
+
+  const averageProgress = taskBasedCommittees.length > 0
+    ? taskBasedCommittees.reduce((sum: number, committee: any) => {
+        const rawProgress =
+          committee.operational_progress ??
+          committee.progress_percentage ??
+          committee.progress ??
+          0;
+        return sum + (parseFloat(String(rawProgress)) || 0);
+      }, 0) / taskBasedCommittees.length
+    : 0;
+
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Task-Based Committees</Typography>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={() => navigate(`/events/${eventId}/subcommittees/create`)}
+      <Paper sx={{ p: { xs: 2, sm: 3 }, mb: 3 }}>
+        <Box
+          display="flex"
+          justifyContent="space-between"
+          alignItems={{ xs: 'flex-start', sm: 'center' }}
+          flexDirection={{ xs: 'column', sm: 'row' }}
+          gap={2}
+          mb={2}
         >
-          Create Subcommittee
-        </Button>
-      </Box>
+          <Box>
+            <Typography variant="h4" sx={{ fontSize: { xs: '1.5rem', sm: '2rem' } }}>
+              Task Committees
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Operational subcommittees for task execution and field coordination.
+            </Typography>
+          </Box>
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={() => navigate(`/events/${eventId}/subcommittees/create`)}
+          >
+            Create Subcommittee
+          </Button>
+        </Box>
+
+        <Box display="flex" flexDirection={{ xs: 'column', sm: 'row' }} gap={2} mb={2}>
+          <Box flex={1}>
+            <Typography variant="body2" color="text.secondary">
+              Total committees: <strong>{taskBasedCommittees.length}</strong>
+            </Typography>
+          </Box>
+          <Box flex={1}>
+            <Typography variant="body2" color="text.secondary">
+              Average progress: <strong>{averageProgress.toFixed(1)}%</strong>
+            </Typography>
+          </Box>
+        </Box>
+
+        <Box sx={{ mt: 2 }}>
+          <Box display="flex" justifyContent="space-between" mb={1}>
+            <Typography variant="body2" fontWeight="medium">
+              Operational Progress
+            </Typography>
+            <Typography variant="body2" fontWeight="bold" color="primary">
+              {averageProgress.toFixed(1)}%
+            </Typography>
+          </Box>
+          <LinearProgress
+            variant="determinate"
+            value={Math.min(Math.max(averageProgress, 0), 100)}
+            sx={{ height: 12, borderRadius: 6 }}
+          />
+        </Box>
+      </Paper>
 
       {isLoading ? (
         <Grid container spacing={3}>
@@ -81,11 +142,15 @@ const SubcommitteesListPage: React.FC = () => {
         </Grid>
       ) : (
         <Grid container spacing={3}>
-          {((committeesWithMembers || committees)?.filter((committee: any) =>
-            isTaskBasedCommittee(committee)
-          ) || [])?.map((committee: any) => {
+          {taskBasedCommittees.map((committee: any) => {
             const members = committee.members || [];
             const lead = members.find((m: CommitteeMember) => m.is_lead);
+            const rawProgress =
+              committee.operational_progress ??
+              committee.progress_percentage ??
+              committee.progress ??
+              0;
+            const progress = Math.max(0, Math.min(100, parseFloat(String(rawProgress)) || 0));
             
             return (
               <Grid item xs={12} md={6} lg={4} key={committee.id}>
@@ -161,7 +226,7 @@ const SubcommitteesListPage: React.FC = () => {
                     <Box display="flex" gap={1} flexWrap="wrap">
                       <Chip
                         icon={<Group />}
-                        label={`${members.length} members`}
+                        label={`${committee.member_count ?? members.length} members`}
                         size="small"
                         variant="outlined"
                       />
@@ -179,6 +244,23 @@ const SubcommitteesListPage: React.FC = () => {
                         />
                       )}
                     </Box>
+
+                    <Box sx={{ mt: 2 }}>
+                      <Box display="flex" justifyContent="space-between" alignItems="center" mb={0.5}>
+                        <Typography variant="caption" color="text.secondary">
+                          Progress
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {progress.toFixed(0)}%
+                        </Typography>
+                      </Box>
+                      <LinearProgress
+                        variant="determinate"
+                        value={progress}
+                        color={progress >= 75 ? 'success' : progress >= 50 ? 'warning' : 'error'}
+                        sx={{ height: 8, borderRadius: 999 }}
+                      />
+                    </Box>
                   </CardContent>
                 </Card>
               </Grid>
@@ -187,9 +269,7 @@ const SubcommitteesListPage: React.FC = () => {
         </Grid>
       )}
       {/* Empty state for operational subcommittees */}
-      {!isLoading && ((committeesWithMembers || committees)?.filter((c: any) =>
-        isTaskBasedCommittee(c)
-      ).length === 0) && (
+      {!isLoading && taskBasedCommittees.length === 0 && (
         <Card sx={{ p: 3, textAlign: 'center', mt: 3 }}>
           <Typography color="text.secondary" gutterBottom>
             No operational subcommittees yet.

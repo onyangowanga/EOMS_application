@@ -25,6 +25,7 @@ export interface User {
   roles?: RBACRole[];
   subcommittee_roles?: Record<string, 'lead' | 'member'>;
   cluster_roles?: Record<string, 'lead' | 'member'>;
+  has_password?: boolean;
   is_verified: boolean;
   is_active: boolean;
   created_at: string;
@@ -40,6 +41,22 @@ export interface LoginResponse {
   sent: boolean;
   method: string;
   otp?: string; // Only in dev mode when sending fails
+}
+
+export interface PasswordLoginRequest {
+  identifier: string;
+  password: string;
+}
+
+export interface PasswordResetRequest {
+  identifier: string;
+  delivery_method: 'sms' | 'email';
+}
+
+export interface PasswordResetConfirmRequest {
+  identifier: string;
+  otp_code: string;
+  new_password: string;
 }
 
 export interface VerifyOTPRequest {

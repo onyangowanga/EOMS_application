@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Box,
   Typography,
@@ -9,7 +9,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Divider,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -18,6 +17,9 @@ import {
 } from '@mui/material';
 import { Save, Archive, Lock } from '@mui/icons-material';
 import { useParams } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { eventService } from '../services/event.service';
+import type { Event } from '../types';
 
 /**
  * Event Settings Page - Admin Module
@@ -25,32 +27,77 @@ import { useParams } from 'react-router-dom';
  */
 const EventSettingsPage: React.FC = () => {
   const { eventId } = useParams<{ eventId: string }>();
+  const queryClient = useQueryClient();
   const [formData, setFormData] = useState({
-    eventName: 'Annual Fundraiser',
+    eventName: '',
     eventType: 'FUNERAL',
-    eventDate: '2026-04-15',
-    location: 'Community Hall',
-    description: 'Annual community fundraiser event',
+    eventDate: '',
+    location: '',
+    description: '',
     status: 'PLANNING',
   });
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [finalizeDialogOpen, setFinalizeDialogOpen] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const { data: event, isLoading } = useQuery<Event>({
+    queryKey: ['event', eventId, 'settings'],
+    queryFn: () => eventService.getEvent(eventId!),
+    enabled: !!eventId,
+  });
+
+  useEffect(() => {
+    if (event) {
+      setFormData({
+        eventName: event.event_name || '',
+        eventType: event.event_type || 'FUNERAL',
+        eventDate: event.event_date || '',
+        location: event.location || '',
+        description: event.description || '',
+        status: event.status || 'PLANNING',
+      });
+    }
+  }, [event]);
+
+  const updateEventMutation = useMutation({
+    mutationFn: (payload: any) => eventService.updateEvent(eventId!, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['event', eventId] });
+      queryClient.invalidateQueries({ queryKey: ['event', eventId, 'settings'] });
+      setErrorMessage('');
+      setSuccessMessage('Event settings saved successfully.');
+    },
+    onError: (error: any) => {
+      setSuccessMessage('');
+      setErrorMessage(error?.response?.data?.error || 'Failed to update event settings');
+    },
+  });
 
   const handleSave = () => {
-    // TODO: Implement save
-    console.log('Saving event settings:', formData);
+    if (!eventId) return;
+    updateEventMutation.mutate({
+      event_name: formData.eventName,
+      event_type: formData.eventType,
+      event_date: formData.eventDate,
+      location: formData.location,
+      description: formData.description,
+      status: formData.status,
+    });
   };
 
   const handleArchive = () => {
-    // TODO: Implement archive
-    console.log('Archiving event');
+    if (!eventId) return;
+    updateEventMutation.mutate({ status: 'CANCELLED' });
     setArchiveDialogOpen(false);
+    setFormData((prev) => ({ ...prev, status: 'CANCELLED' }));
   };
 
   const handleFinalize = () => {
-    // TODO: Implement finalize
-    console.log('Finalizing event');
+    if (!eventId) return;
+    updateEventMutation.mutate({ status: 'COMPLETED' });
     setFinalizeDialogOpen(false);
+    setFormData((prev) => ({ ...prev, status: 'COMPLETED' }));
   };
 
   return (
@@ -58,6 +105,18 @@ const EventSettingsPage: React.FC = () => {
       <Typography variant="h4" gutterBottom>
         Event Settings
       </Typography>
+
+      {successMessage && (
+        <Alert severity="success" sx={{ mb: 2 }}>
+          {successMessage}
+        </Alert>
+      )}
+
+      {errorMessage && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {errorMessage}
+        </Alert>
+      )}
 
       <Paper sx={{ p: 3, maxWidth: 800, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
@@ -70,6 +129,7 @@ const EventSettingsPage: React.FC = () => {
           value={formData.eventName}
           onChange={(e) => setFormData({ ...formData, eventName: e.target.value })}
           sx={{ mb: 2 }}
+          disabled={isLoading || updateEventMutation.isPending}
         />
 
         <FormControl fullWidth sx={{ mb: 2 }}>
@@ -78,6 +138,7 @@ const EventSettingsPage: React.FC = () => {
             value={formData.eventType}
             label="Event Type"
             onChange={(e) => setFormData({ ...formData, eventType: e.target.value })}
+            disabled={isLoading || updateEventMutation.isPending}
           >
             <MenuItem value="FUNERAL">Funeral</MenuItem>
             <MenuItem value="WEDDING">Wedding</MenuItem>
@@ -94,6 +155,7 @@ const EventSettingsPage: React.FC = () => {
           onChange={(e) => setFormData({ ...formData, eventDate: e.target.value })}
           InputLabelProps={{ shrink: true }}
           sx={{ mb: 2 }}
+          disabled={isLoading || updateEventMutation.isPending}
         />
 
         <TextField
@@ -102,6 +164,7 @@ const EventSettingsPage: React.FC = () => {
           value={formData.location}
           onChange={(e) => setFormData({ ...formData, location: e.target.value })}
           sx={{ mb: 2 }}
+          disabled={isLoading || updateEventMutation.isPending}
         />
 
         <TextField
@@ -112,10 +175,26 @@ const EventSettingsPage: React.FC = () => {
           multiline
           rows={3}
           sx={{ mb: 3 }}
+          disabled={isLoading || updateEventMutation.isPending}
         />
 
-        <Button variant="contained" startIcon={<Save />} onClick={handleSave}>
-          Save Changes
+        <FormControl fullWidth sx={{ mb: 3 }}>
+          <InputLabel>Status</InputLabel>
+          <Select
+            value={formData.status}
+            label="Status"
+            onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+            disabled={isLoading || updateEventMutation.isPending}
+          >
+            <MenuItem value="PLANNING">Planning</MenuItem>
+            <MenuItem value="ACTIVE">Active</MenuItem>
+            <MenuItem value="COMPLETED">Completed</MenuItem>
+            <MenuItem value="CANCELLED">Cancelled</MenuItem>
+          </Select>
+        </FormControl>
+
+        <Button variant="contained" startIcon={<Save />} onClick={handleSave} disabled={isLoading || updateEventMutation.isPending}>
+          {updateEventMutation.isPending ? 'Saving...' : 'Save Changes'}
         </Button>
       </Paper>
 
@@ -157,7 +236,7 @@ const EventSettingsPage: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setArchiveDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleArchive} color="primary">
+          <Button onClick={handleArchive} color="primary" disabled={updateEventMutation.isPending}>
             Archive
           </Button>
         </DialogActions>
@@ -174,7 +253,7 @@ const EventSettingsPage: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setFinalizeDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleFinalize} color="error">
+          <Button onClick={handleFinalize} color="error" disabled={updateEventMutation.isPending}>
             Finalize
           </Button>
         </DialogActions>

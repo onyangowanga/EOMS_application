@@ -503,6 +503,20 @@ class EventService {
     return response.data;
   }
 
+  // ==================== Notifications ====================
+
+  /**
+   * Get notifications for current user
+   */
+  async getMyNotifications(eventId?: string, limit = 20): Promise<any[]> {
+    const searchParams = new URLSearchParams({ limit: String(limit) });
+    if (eventId) {
+      searchParams.set('event', eventId);
+    }
+    const response = await apiClient.get(`${this.baseUrl}/notifications/my_notifications/?${searchParams.toString()}`);
+    return (response.data as any)?.notifications || [];
+  }
+
   // ==================== Dashboard Aggregated Data ====================
 
   /**

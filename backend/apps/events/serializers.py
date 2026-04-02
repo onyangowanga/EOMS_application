@@ -173,12 +173,9 @@ class EventCreateSerializer(serializers.ModelSerializer):
                     email=member_data.get('email', ''),
                     full_name=member_data['full_name'],
                 )
-                # Set a temporary random password (they'll use OTP to login)
-                import random
-                import string
-                temp_password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
-                user_obj.set_password(temp_password)
-                user_obj.save()
+                # Force first-time password setup after OTP login.
+                user_obj.set_unusable_password()
+                user_obj.save(update_fields=['password'])
             
             # Create EventMember
             event_member = EventMember.objects.create(

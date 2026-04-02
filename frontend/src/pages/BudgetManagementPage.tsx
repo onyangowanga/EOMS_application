@@ -28,6 +28,10 @@ import {
   LinearProgress,
   Divider,
   Tooltip,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -43,6 +47,7 @@ import { eventService } from '../services/event.service';
 import { financeService } from '../services/finance.service';
 import { useAuth } from '../contexts/AuthContext';
 import type { ExpensePhase6, BudgetItem } from '../types';
+import { isTaskBasedCommittee } from '../utils/committeeModules';
 
 /**
  * BudgetManagementPage - Comprehensive budget tracking and approval workflow
@@ -66,7 +71,7 @@ interface BudgetFormData {
 
 const BudgetManagementPage: React.FC = () => {
   const { eventId } = useParams<{ eventId: string }>();
-  const { user, hasRole } = useAuth();
+  const { hasRole } = useAuth();
   const queryClient = useQueryClient();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -110,9 +115,9 @@ const BudgetManagementPage: React.FC = () => {
     enabled: !!eventId,
   });
 
-  const { data: eventMembers } = useQuery({
-    queryKey: ['event-members', eventId],
-    queryFn: () => eventService.getEventMembers(eventId!),
+  const { data: committees } = useQuery({
+    queryKey: ['committees', eventId],
+    queryFn: () => eventService.getEventCommittees(eventId!),
     enabled: !!eventId,
   });
 
@@ -124,7 +129,6 @@ const BudgetManagementPage: React.FC = () => {
     ? budgetItems
     : ((budgetItems as any)?.results || []);
 
-  const currentEventRole = eventMembers?.find((member: any) => member.user_details?.id === user?.id)?.role;
   const canAllocateBudget = hasRole(['executive_admin', 'finance_member', 'chair', 'treasurer']);
 
   const canApproveAsChair = hasRole(['executive_admin', 'chair']);
@@ -721,6 +725,26 @@ const BudgetManagementPage: React.FC = () => {
               required
               placeholder="e.g., Logistics, Food, Transport"
             />
+
+            <FormControl fullWidth>
+              <InputLabel>Attach to Subcommittee</InputLabel>
+              <Select
+                value={formData.committee || ''}
+                label="Attach to Subcommittee"
+                onChange={(e) => setFormData((prev) => ({ ...prev, committee: e.target.value || undefined }))}
+              >
+                <MenuItem value="">
+                  <em>Unassigned</em>
+                </MenuItem>
+                {(committees || [])
+                  .filter((committee: any) => isTaskBasedCommittee(committee))
+                  .map((committee: any) => (
+                    <MenuItem key={committee.id} value={committee.id}>
+                      {committee.name}
+                    </MenuItem>
+                  ))}
+              </Select>
+            </FormControl>
 
             <TextField
               name="allocated_amount"

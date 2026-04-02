@@ -7,6 +7,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import DashboardRedirect from './components/DashboardRedirect';
+import PWAUpdatePrompt from './components/PWAUpdatePrompt';
 import theme from './theme';
 
 // Authentication Pages
@@ -14,6 +15,7 @@ import LoginPage from './pages/LoginPage';
 import SelectOTPMethodPage from './pages/SelectOTPMethodPage';
 import VerifyOTPPage from './pages/VerifyOTPPage';
 import OnboardingPage from './pages/OnboardingPage';
+import SetInitialPasswordPage from './pages/SetInitialPasswordPage';
 
 // Event Pages
 import EventSetupWizard from './pages/EventSetupWizard';
@@ -103,6 +105,7 @@ function App() {
                   {/* Dashboard */}
                   <Route index element={<DashboardRedirect />} />
                   <Route path="dashboard" element={<DashboardRedirect />} />
+                  <Route path="set-password" element={<SetInitialPasswordPage />} />
                   
                   {/* Event Routes - IMPORTANT: Static routes MUST come before dynamic :eventId routes */}
                   {/* Single Event System: Only one event creation route for first-time setup */}
@@ -189,6 +192,7 @@ function App() {
                   <Route path="reports" element={<ReportsPage />} />
                 </Route>
               </Routes>
+              <PWAUpdatePrompt />
             </BrowserRouter>
           </AuthProvider>
         </ThemeProvider>

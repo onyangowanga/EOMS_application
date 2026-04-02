@@ -38,12 +38,15 @@ import {
 import {
   AddCircle as AddIcon,
   Send as SendIcon,
+  AutoFixHigh as AutoParseIcon,
+  ContentCopy as CopyIcon,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { eventService } from '../services/event.service';
 import type { ClusterContribution, ClusterDeposit } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { formatKenyaAmount, parseMpesaMessage } from '../utils/mpesa';
 
 const PAYMENT_CHANNELS = ['CASH', 'MPESA', 'BANK', 'CHEQUE', 'OTHER'];
 
@@ -52,6 +55,17 @@ const ClusterDetailsPage: React.FC = () => {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const [currentTab, setCurrentTab] = useState(0);
+  const [rawMpesaMessage, setRawMpesaMessage] = useState('');
+  const [parseNotice, setParseNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [whatsAppNotice, setWhatsAppNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [whatsAppTopTemplate, setWhatsAppTopTemplate] = useState(
+    '{{event_name_upper}}\nSupporting {{cluster_name}} and the Family\nTarget Amount: KES {{target_amount}}\nBurial Date: {{event_date}} - {{event_location}}\nKindly Send your support to this till no: {{till_number}} - {{till_account_name}}'
+  );
+  const [tillNumber, setTillNumber] = useState('');
+  const [tillAccountName, setTillAccountName] = useState('');
+  const [whatsAppBottomMessage, setWhatsAppBottomMessage] = useState(
+    'On behalf of {{cluster_name}} and the family, we sincerely thank each and every one of you for your generous contributions, prayers, and support during this difficult time.\n\nMay God bless you abundantly for your compassion and generosity.'
+  );
 
   // Ã¢â€â‚¬Ã¢â€â‚¬ Contribution dialog Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const [contribOpen, setContribOpen] = useState(false);
@@ -102,6 +116,12 @@ const ClusterDetailsPage: React.FC = () => {
     enabled: !!cluster?.event,
   });
 
+  const { data: eventDetails } = useQuery({
+    queryKey: ['event-details-for-cluster', cluster?.event],
+    queryFn: () => eventService.getEvent(String(cluster!.event)),
+    enabled: !!cluster?.event,
+  });
+
   // Ã¢â€â‚¬Ã¢â€â‚¬ Mutations Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const addContribMutation = useMutation({
     mutationFn: (data: Parameters<typeof eventService.createClusterContribution>[0]) =>
@@ -111,6 +131,8 @@ const ClusterDetailsPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['cluster', clusterId] });
       setContribOpen(false);
       setContribForm({ contributor_name: '', contributor_phone: '', amount: '', is_pledge: false, payment_channel: 'CASH', reference_number: '', notes: '' });
+      setRawMpesaMessage('');
+      setParseNotice(null);
     },
   });
 
@@ -174,6 +196,81 @@ const ClusterDetailsPage: React.FC = () => {
       reference_number: contribForm.reference_number || undefined,
       notes: contribForm.notes || undefined,
     });
+  };
+
+  const handleParseMpesaMessage = () => {
+    const parsed = parseMpesaMessage(rawMpesaMessage);
+
+    if (!parsed) {
+      setParseNotice({ type: 'error', message: 'Could not parse message. Paste the full M-Pesa SMS and try again.' });
+      return;
+    }
+
+    const parsedDateNote = parsed.transactionDateText
+      ? `M-Pesa transaction date: ${parsed.transactionDateText}`
+      : '';
+
+    setContribForm((prev) => ({
+      ...prev,
+      contributor_name: parsed.contributorName || prev.contributor_name,
+      contributor_phone: parsed.contributorPhone || prev.contributor_phone,
+      amount: parsed.amount !== undefined ? String(parsed.amount) : prev.amount,
+      payment_channel: 'MPESA',
+      reference_number: parsed.transactionReference || prev.reference_number,
+      notes: parsedDateNote
+        ? `${prev.notes ? `${prev.notes}\n` : ''}${parsedDateNote}`.trim()
+        : prev.notes,
+    }));
+
+    setParseNotice({ type: 'success', message: 'M-Pesa message parsed. Verify and save the record.' });
+  };
+
+  const buildWhatsAppUpdateText = () => {
+    const eventName = eventDetails?.event_name || 'Event Fundraising Update';
+    const clusterName = cluster?.name || 'Cluster';
+    const eventLocation = eventDetails?.location || '[Location not set]';
+    const eventDate = eventDetails?.event_date
+      ? new Date(eventDetails.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+      : '[Date not set]';
+
+    const tokenMap: Record<string, string> = {
+      event_name: eventName,
+      event_name_upper: String(eventName).toUpperCase(),
+      cluster_name: clusterName,
+      target_amount: formatKenyaAmount(targetAmount),
+      event_date: eventDate,
+      event_location: eventLocation,
+      till_number: tillNumber || '[ADD TILL NO]',
+      till_account_name: tillAccountName || '[ACCOUNT NAME]',
+    };
+
+    const applyTemplate = (template: string) =>
+      template.replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (_match, key) => tokenMap[key] ?? '');
+
+    const header = [applyTemplate(whatsAppTopTemplate), ''];
+
+    const contributorLines = collections
+      .slice()
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+      .map((item, idx) => `${idx + 1}. ${item.contributor_name} - KES ${formatKenyaAmount(parseFloat(item.amount || '0'))}`);
+
+    const maxLines = collections.length + 10;
+    while (contributorLines.length < maxLines) {
+      contributorLines.push(`${contributorLines.length + 1}. `);
+    }
+
+    const footer = ['', applyTemplate(whatsAppBottomMessage)];
+
+    return [...header, ...contributorLines, ...footer].join('\n');
+  };
+
+  const handleCopyWhatsAppUpdate = async () => {
+    try {
+      await navigator.clipboard.writeText(buildWhatsAppUpdateText());
+      setWhatsAppNotice({ type: 'success', message: 'WhatsApp fundraising update copied to clipboard.' });
+    } catch (_error) {
+      setWhatsAppNotice({ type: 'error', message: 'Clipboard copy failed. Please copy manually from generated text.' });
+    }
   };
 
   const handleSaveDeposit = () => {
@@ -446,6 +543,13 @@ const ClusterDetailsPage: React.FC = () => {
         <Stack direction="row" spacing={1}>
           <Button
             variant="outlined"
+            startIcon={<CopyIcon />}
+            onClick={handleCopyWhatsAppUpdate}
+          >
+            Copy WhatsApp Update
+          </Button>
+          <Button
+            variant="outlined"
             startIcon={<AddIcon />}
             disabled={!canManageClusterTransactions}
             onClick={() => setContribOpen(true)}
@@ -473,6 +577,53 @@ const ClusterDetailsPage: React.FC = () => {
         </Alert>
       )}
 
+      {whatsAppNotice && (
+        <Alert severity={whatsAppNotice.type} sx={{ mb: 2 }} onClose={() => setWhatsAppNotice(null)}>
+          {whatsAppNotice.message}
+        </Alert>
+      )}
+
+      <Paper sx={{ mb: 3, p: 2.5 }}>
+        <Typography variant="h6" gutterBottom>
+          WhatsApp Contribution Template
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          {'Edit the top and bottom messages plus till details. Use placeholders like {{event_name}}, {{cluster_name}}, {{target_amount}}, {{event_date}}, {{event_location}}, {{till_number}}, {{till_account_name}}.'}
+        </Typography>
+        <Stack spacing={2}>
+          <TextField
+            label="Top Message"
+            multiline
+            minRows={5}
+            value={whatsAppTopTemplate}
+            onChange={(e) => setWhatsAppTopTemplate(e.target.value)}
+            fullWidth
+          />
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+            <TextField
+              label="Till Number"
+              value={tillNumber}
+              onChange={(e) => setTillNumber(e.target.value)}
+              fullWidth
+            />
+            <TextField
+              label="Till Account Name"
+              value={tillAccountName}
+              onChange={(e) => setTillAccountName(e.target.value)}
+              fullWidth
+            />
+          </Stack>
+          <TextField
+            label="Bottom Message"
+            multiline
+            minRows={4}
+            value={whatsAppBottomMessage}
+            onChange={(e) => setWhatsAppBottomMessage(e.target.value)}
+            fullWidth
+          />
+        </Stack>
+      </Paper>
+
       <Paper sx={{ mb: 3 }}>
         <Tabs value={currentTab} onChange={(_, v) => setCurrentTab(v)} variant="scrollable" scrollButtons="auto">
           <Tab label="Overview" />
@@ -485,11 +636,28 @@ const ClusterDetailsPage: React.FC = () => {
 
       <Box>{renderTabContent()}</Box>
 
-      {/* Ã¢â€â‚¬Ã¢â€â‚¬ Record Contribution Dialog Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */}
+      {/* Record Contribution Dialog */}
       <Dialog open={contribOpen} onClose={() => setContribOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>{contribForm.is_pledge ? 'Record Pledge' : 'Record Collection'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="Paste M-Pesa Message"
+              value={rawMpesaMessage}
+              onChange={e => setRawMpesaMessage(e.target.value)}
+              multiline
+              minRows={3}
+              fullWidth
+              placeholder="Paste full M-Pesa SMS to auto-fill name, phone, amount, reference"
+            />
+            <Button variant="outlined" startIcon={<AutoParseIcon />} onClick={handleParseMpesaMessage}>
+              Parse M-Pesa Message
+            </Button>
+            {parseNotice && (
+              <Alert severity={parseNotice.type} onClose={() => setParseNotice(null)}>
+                {parseNotice.message}
+              </Alert>
+            )}
             <TextField
               label="Contributor Name *"
               value={contribForm.contributor_name}
@@ -557,16 +725,14 @@ const ClusterDetailsPage: React.FC = () => {
           <Button
             variant="contained"
             onClick={handleSaveContrib}
-            disabled={addContribMutation.isPending || !contribForm.contributor_name || !contribForm.amount}
-                disabled={!canManageClusterTransactions}
+            disabled={!canManageClusterTransactions || addContribMutation.isPending || !contribForm.contributor_name || !contribForm.amount}
           >
             {addContribMutation.isPending ? 'Saving...' : 'Save'}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Ã¢â€â‚¬Ã¢â€â‚¬ Submit Funds to Treasury Dialog Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */}
-                disabled={!canManageClusterTransactions}
+      {/* Submit Funds to Treasury Dialog */}
       <Dialog open={depositOpen} onClose={() => setDepositOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Submit Funds to Treasury</DialogTitle>
         <DialogContent>
@@ -575,7 +741,6 @@ const ClusterDetailsPage: React.FC = () => {
           </Alert>
           <Alert severity={clusterProgress >= 70 ? 'success' : clusterProgress >= 40 ? 'warning' : 'error'} sx={{ mb: 2 }}>
             Cluster financial progress: <strong>{clusterProgress.toFixed(1)}%</strong>
-                disabled={!canManageClusterTransactions}
           </Alert>
           <Stack spacing={2}>
             <TextField
@@ -588,7 +753,7 @@ const ClusterDetailsPage: React.FC = () => {
             />
             {exceedsLeadFunds && (
               <Alert severity="error">
-            disabled={!canManageClusterTransactions || addContribMutation.isPending || !contribForm.contributor_name || !contribForm.amount}
+                Amount exceeds funds currently with lead ({fmt(pendingInLeadAmount)}).
               </Alert>
             )}
             <FormControl fullWidth>
@@ -596,7 +761,7 @@ const ClusterDetailsPage: React.FC = () => {
               <Select
                 value={depositForm.deposit_channel}
                 label="Deposit Channel"
-            disabled={!canManageClusterTransactions || addDepositMutation.isPending || !depositForm.amount || depositAmount <= 0 || exceedsLeadFunds}
+                onChange={e => setDepositForm(f => ({ ...f, deposit_channel: e.target.value }))}
               >
                 {PAYMENT_CHANNELS.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
               </Select>

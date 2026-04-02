@@ -1,0 +1,70 @@
+version: "3.9"
+
+services:
+  # =========================
+  # Backend (Django)
+  # =========================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: eoms-backend
+    command: gunicorn core.wsgi:application --bind 0.0.0.0:8000
+    env_file:
+      - ./backend/.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+    restart: always
+
+  # =========================
+  # Frontend (React build served by Nginx)
+  # =========================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: eoms-frontend
+    restart: always
+
+  # =========================
+  # Reverse Proxy (NGINX)
+  # =========================
+  nginx:
+    image: nginx:latest
+    container_name: eoms-nginx
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./frontend/build:/usr/share/nginx/html
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+      - frontend
+    restart: always
+
+  # =========================
+  # PostgreSQL
+  # =========================
+  db:
+    image: postgres:15
+    container_name: eoms-postgres
+    restart: always
+    env_file:
+      - ./db/.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # =========================
+  # Redis
+  # =========================
+  redis:
+    image: redis:alpine
+    container_name: eoms-redis
+    restart: always
+
+volumes:
+  postgres_data:
