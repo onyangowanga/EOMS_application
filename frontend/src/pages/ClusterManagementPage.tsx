@@ -100,7 +100,7 @@ const ClusterManagementPage: React.FC = () => {
   const createClusterMutation = useMutation({
     mutationFn: (data: any) => eventService.createCluster(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['clusters'] });
+      queryClient.invalidateQueries({ queryKey: ['clusters', eventId] });
       handleCloseDialog();
     },
     onError: (error: any) => {
@@ -117,6 +117,30 @@ const ClusterManagementPage: React.FC = () => {
         }
       }
       setFormError(error.response?.data?.message || 'Failed to create cluster');
+    },
+  });
+
+  const updateClusterMutation = useMutation({
+    mutationFn: ({ clusterId, data }: { clusterId: string; data: any }) =>
+      eventService.updateCluster(clusterId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['clusters', eventId] });
+      handleCloseDialog();
+    },
+    onError: (error: any) => {
+      const data = error.response?.data;
+      if (typeof data === 'string') {
+        setFormError(data);
+        return;
+      }
+      if (data && typeof data === 'object') {
+        const firstFieldError = Object.values(data)[0];
+        if (Array.isArray(firstFieldError) && firstFieldError[0]) {
+          setFormError(String(firstFieldError[0]));
+          return;
+        }
+      }
+      setFormError(error.response?.data?.message || 'Failed to update cluster');
     },
   });
 
@@ -208,6 +232,11 @@ const ClusterManagementPage: React.FC = () => {
         return;
       }
       submitData.cluster_lead = leaderId;
+    }
+
+    if (editingCluster) {
+      updateClusterMutation.mutate({ clusterId: String(editingCluster.id), data: submitData });
+      return;
     }
 
     createClusterMutation.mutate(submitData);
@@ -596,10 +625,16 @@ const ClusterManagementPage: React.FC = () => {
           <Button
             onClick={handleSubmit}
             variant="contained"
-            disabled={createClusterMutation.isPending}
+            disabled={createClusterMutation.isPending || updateClusterMutation.isPending}
             sx={{ minHeight: 40 }}
           >
-            {createClusterMutation.isPending ? 'Creating...' : editingCluster ? 'Update' : 'Create'}
+            {createClusterMutation.isPending
+              ? 'Creating...'
+              : updateClusterMutation.isPending
+                ? 'Updating...'
+                : editingCluster
+                  ? 'Update'
+                  : 'Create'}
           </Button>
         </DialogActions>
       </Dialog>

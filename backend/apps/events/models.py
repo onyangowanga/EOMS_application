@@ -146,22 +146,22 @@ class EventMember(models.Model):
     @property
     def is_official(self):
         """Check if member is an official (Chairman, Secretary, Treasurer, or Event Owner)"""
-        return self.role in ['CHAIRMAN', 'SECRETARY', 'TREASURER', 'EVENT_OWNER']
+        return self.role in ['CHAIRMAN', 'SECRETARY', 'TREASURER', 'EVENT_OWNER'] or self.user.role == 'ADMIN'
     
     @property
     def is_executive(self):
         """Check if member is an executive committee member"""
-        return self.role in ['CHAIRMAN', 'SECRETARY', 'TREASURER', 'EVENT_OWNER']
+        return self.role in ['CHAIRMAN', 'SECRETARY', 'TREASURER', 'EVENT_OWNER'] or self.user.role == 'ADMIN'
     
     @property
     def has_super_admin_rights(self):
         """Event owners have super admin rights"""
-        return self.role == 'EVENT_OWNER'
+        return self.role == 'EVENT_OWNER' or self.user.role == 'ADMIN'
     
     @property
     def can_approve_expenses(self):
         """Can this member approve expenses?"""
-        return self.role in ['CHAIRMAN', 'TREASURER']
+        return self.role in ['CHAIRMAN', 'TREASURER'] or self.user.role == 'ADMIN'
     
     @property
     def can_manage_roles(self):

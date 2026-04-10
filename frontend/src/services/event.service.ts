@@ -270,6 +270,7 @@ class EventService {
     channel: 'CASH' | 'MPESA' | 'BANK' | 'OTHER';
     reference_number?: string;
     description?: string;
+    recorded_at?: string;
   }) {
     const response = await apiClient.post('/finance/collections/', {
       event: data.event,
@@ -281,6 +282,7 @@ class EventService {
       channel: data.channel,
       reference_number: data.reference_number || '',
       description: data.description || '',
+      recorded_at: data.recorded_at,
     });
     return response.data;
   }
@@ -391,6 +393,23 @@ class EventService {
     funds_in_lead_account?: string;
   }): Promise<ClusterGroup> {
     const response = await apiClient.post<ClusterGroup>(`${this.baseUrl}/clusters/`, data);
+    return response.data;
+  }
+
+  /**
+   * Update an existing cluster
+   */
+  async updateCluster(
+    clusterId: string,
+    data: {
+      event?: string;
+      name?: string;
+      target_amount?: string;
+      cluster_lead?: number | null;
+      funds_in_lead_account?: string;
+    }
+  ): Promise<ClusterGroup> {
+    const response = await apiClient.patch<ClusterGroup>(`${this.baseUrl}/clusters/${clusterId}/`, data);
     return response.data;
   }
 

@@ -2,14 +2,25 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
+const backendOrigin = process.env.VITE_DEV_PROXY_TARGET || 'http://backend:8000'
+
 // https://vite.dev/config/
 export default defineConfig({
+  server: {
+    host: '0.0.0.0',
+    proxy: {
+      '/api': backendOrigin,
+      '/admin': backendOrigin,
+      '/static': backendOrigin,
+      '/media': backendOrigin,
+    },
+  },
   plugins: [
     react(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: [
-        'favicon_io/favicon.ico',
+        'favicon.svg',
         'favicon_io/favicon-16x16.png',
         'favicon_io/favicon-32x32.png',
         'favicon_io/apple-touch-icon.png',

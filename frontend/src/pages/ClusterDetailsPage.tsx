@@ -49,11 +49,25 @@ import { useAuth } from '../contexts/AuthContext';
 import { formatKenyaAmount, parseMpesaMessage } from '../utils/mpesa';
 
 const PAYMENT_CHANNELS = ['CASH', 'MPESA', 'BANK', 'CHEQUE', 'OTHER'];
+const COLLECTION_ENTRY_MODES = ['INDIVIDUAL', 'MANUAL', 'CASH_SUMMARY'] as const;
+
+type CollectionEntryMode = (typeof COLLECTION_ENTRY_MODES)[number];
+
+const createInitialContributionForm = () => ({
+  contributor_name: '',
+  contributor_phone: '',
+  amount: '',
+  is_pledge: false,
+  payment_channel: 'CASH',
+  reference_number: '',
+  notes: '',
+  entry_mode: 'INDIVIDUAL' as CollectionEntryMode,
+});
 
 const ClusterDetailsPage: React.FC = () => {
   const { clusterId } = useParams<{ clusterId: string }>();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
   const [currentTab, setCurrentTab] = useState(0);
   const [rawMpesaMessage, setRawMpesaMessage] = useState('');
   const [parseNotice, setParseNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -69,15 +83,7 @@ const ClusterDetailsPage: React.FC = () => {
 
   // Ã¢â€â‚¬Ã¢â€â‚¬ Contribution dialog Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const [contribOpen, setContribOpen] = useState(false);
-  const [contribForm, setContribForm] = useState({
-    contributor_name: '',
-    contributor_phone: '',
-    amount: '',
-    is_pledge: false,
-    payment_channel: 'CASH',
-    reference_number: '',
-    notes: '',
-  });
+  const [contribForm, setContribForm] = useState(createInitialContributionForm);
 
   // Ã¢â€â‚¬Ã¢â€â‚¬ Deposit dialog Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const [depositOpen, setDepositOpen] = useState(false);
@@ -130,7 +136,7 @@ const ClusterDetailsPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['cluster-contributions', clusterId] });
       queryClient.invalidateQueries({ queryKey: ['cluster', clusterId] });
       setContribOpen(false);
-      setContribForm({ contributor_name: '', contributor_phone: '', amount: '', is_pledge: false, payment_channel: 'CASH', reference_number: '', notes: '' });
+      setContribForm(createInitialContributionForm());
       setRawMpesaMessage('');
       setParseNotice(null);
     },
@@ -152,7 +158,7 @@ const ClusterDetailsPage: React.FC = () => {
   const allDeposits = (cluster?.deposits?.length ? cluster.deposits : deposits) || [];
 
   const currentEventRole = (eventMembers as any[]).find((member: any) => member.user_details?.id === user?.id)?.role;
-  const isOfficial = ['EVENT_OWNER', 'CHAIRMAN', 'SECRETARY', 'TREASURER'].includes(currentEventRole || '');
+  const isOfficial = hasRole('executive_admin') || ['EVENT_OWNER', 'CHAIRMAN', 'SECRETARY', 'TREASURER'].includes(currentEventRole || '');
   const isLeadForThisCluster = String(cluster?.cluster_lead || '') === String(user?.id || '');
   const canManageClusterTransactions = isOfficial || isLeadForThisCluster;
 
@@ -185,16 +191,35 @@ const ClusterDetailsPage: React.FC = () => {
 
   // Ã¢â€â‚¬Ã¢â€â‚¬ Submit handlers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const handleSaveContrib = () => {
-    if (!contribForm.contributor_name || !contribForm.amount) return;
+    const isAggregateEntry = !contribForm.is_pledge && contribForm.entry_mode !== 'INDIVIDUAL';
+    const contributorName = isAggregateEntry
+      ? contribForm.entry_mode === 'MANUAL'
+        ? 'Manual Collection Entry'
+        : 'Cash Collection Summary'
+      : contribForm.contributor_name;
+
+    if (!contributorName || !contribForm.amount) return;
+    if (isAggregateEntry && !contribForm.notes.trim()) return;
+
+    const entryModeNote = isAggregateEntry
+      ? `[${contribForm.entry_mode === 'MANUAL' ? 'MANUAL ENTRY' : 'CASH SUMMARY'}] ${contribForm.notes.trim()}`
+      : contribForm.notes || undefined;
+
     addContribMutation.mutate({
       cluster: clusterId!,
-      contributor_name: contribForm.contributor_name,
-      contributor_phone: contribForm.contributor_phone || undefined,
+      contributor_name: contributorName,
+      contributor_phone: isAggregateEntry ? undefined : contribForm.contributor_phone || undefined,
       amount: parseFloat(contribForm.amount),
       is_pledge: contribForm.is_pledge,
-      payment_channel: contribForm.is_pledge ? undefined : contribForm.payment_channel,
-      reference_number: contribForm.reference_number || undefined,
-      notes: contribForm.notes || undefined,
+      payment_channel: contribForm.is_pledge
+        ? undefined
+        : isAggregateEntry
+          ? contribForm.entry_mode === 'CASH_SUMMARY'
+            ? 'CASH'
+            : 'OTHER'
+          : contribForm.payment_channel,
+      reference_number: isAggregateEntry ? undefined : contribForm.reference_number || undefined,
+      notes: entryModeNote,
     });
   };
 
@@ -342,7 +367,10 @@ const ClusterDetailsPage: React.FC = () => {
               <Button
                 variant="contained"
                 startIcon={<AddIcon />}
-                onClick={() => { setContribForm(f => ({ ...f, is_pledge: false })); setContribOpen(true); }}
+                onClick={() => {
+                  setContribForm({ ...createInitialContributionForm(), is_pledge: false, entry_mode: 'INDIVIDUAL' });
+                  setContribOpen(true);
+                }}
               >
                 Record Collection
               </Button>
@@ -370,6 +398,11 @@ const ClusterDetailsPage: React.FC = () => {
                           <Typography variant="body2" fontWeight="medium">{item.contributor_name}</Typography>
                           {item.contributor_phone && (
                             <Typography variant="caption" color="text.secondary">{item.contributor_phone}</Typography>
+                          )}
+                          {item.notes && (
+                            <Typography variant="caption" color="text.secondary" display="block">
+                              {item.notes}
+                            </Typography>
                           )}
                         </TableCell>
                         <TableCell>
@@ -399,7 +432,10 @@ const ClusterDetailsPage: React.FC = () => {
               <Button
                 variant="outlined"
                 startIcon={<AddIcon />}
-                onClick={() => { setContribForm(f => ({ ...f, is_pledge: true })); setContribOpen(true); }}
+                onClick={() => {
+                  setContribForm({ ...createInitialContributionForm(), is_pledge: true, entry_mode: 'INDIVIDUAL' });
+                  setContribOpen(true);
+                }}
               >
                 Record Pledge
               </Button>
@@ -641,35 +677,70 @@ const ClusterDetailsPage: React.FC = () => {
         <DialogTitle>{contribForm.is_pledge ? 'Record Pledge' : 'Record Collection'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField
-              label="Paste M-Pesa Message"
-              value={rawMpesaMessage}
-              onChange={e => setRawMpesaMessage(e.target.value)}
-              multiline
-              minRows={3}
-              fullWidth
-              placeholder="Paste full M-Pesa SMS to auto-fill name, phone, amount, reference"
-            />
-            <Button variant="outlined" startIcon={<AutoParseIcon />} onClick={handleParseMpesaMessage}>
-              Parse M-Pesa Message
-            </Button>
+            {!contribForm.is_pledge && (
+              <FormControl fullWidth>
+                <InputLabel>Collection Entry Type</InputLabel>
+                <Select
+                  value={contribForm.entry_mode}
+                  label="Collection Entry Type"
+                  onChange={e =>
+                    setContribForm(f => ({
+                      ...f,
+                      entry_mode: e.target.value as CollectionEntryMode,
+                      contributor_name: e.target.value === 'INDIVIDUAL' ? f.contributor_name : '',
+                      contributor_phone: e.target.value === 'INDIVIDUAL' ? f.contributor_phone : '',
+                      reference_number: e.target.value === 'INDIVIDUAL' ? f.reference_number : '',
+                    }))
+                  }
+                >
+                  <MenuItem value="INDIVIDUAL">Individual Transaction</MenuItem>
+                  <MenuItem value="MANUAL">Manual Aggregate Entry</MenuItem>
+                  <MenuItem value="CASH_SUMMARY">Cash Summary Entry</MenuItem>
+                </Select>
+              </FormControl>
+            )}
+
+            {!contribForm.is_pledge && contribForm.entry_mode === 'INDIVIDUAL' && (
+              <>
+                <TextField
+                  label="Paste M-Pesa Message"
+                  value={rawMpesaMessage}
+                  onChange={e => setRawMpesaMessage(e.target.value)}
+                  multiline
+                  minRows={3}
+                  fullWidth
+                  placeholder="Paste full M-Pesa SMS to auto-fill name, phone, amount, reference"
+                />
+                <Button variant="outlined" startIcon={<AutoParseIcon />} onClick={handleParseMpesaMessage}>
+                  Parse M-Pesa Message
+                </Button>
+              </>
+            )}
             {parseNotice && (
               <Alert severity={parseNotice.type} onClose={() => setParseNotice(null)}>
                 {parseNotice.message}
               </Alert>
             )}
-            <TextField
-              label="Contributor Name *"
-              value={contribForm.contributor_name}
-              onChange={e => setContribForm(f => ({ ...f, contributor_name: e.target.value }))}
-              fullWidth
-            />
-            <TextField
-              label="Phone Number"
-              value={contribForm.contributor_phone}
-              onChange={e => setContribForm(f => ({ ...f, contributor_phone: e.target.value }))}
-              fullWidth
-            />
+            {(contribForm.is_pledge || contribForm.entry_mode === 'INDIVIDUAL') ? (
+              <>
+                <TextField
+                  label="Contributor Name *"
+                  value={contribForm.contributor_name}
+                  onChange={e => setContribForm(f => ({ ...f, contributor_name: e.target.value }))}
+                  fullWidth
+                />
+                <TextField
+                  label="Phone Number"
+                  value={contribForm.contributor_phone}
+                  onChange={e => setContribForm(f => ({ ...f, contributor_phone: e.target.value }))}
+                  fullWidth
+                />
+              </>
+            ) : (
+              <Alert severity="info">
+                Use this mode to capture old collections in one entry. Add the total amount and explain the source in the reason field.
+              </Alert>
+            )}
             <TextField
               label="Amount (KES) *"
               type="number"
@@ -689,26 +760,34 @@ const ClusterDetailsPage: React.FC = () => {
             />
             {!contribForm.is_pledge && (
               <>
-                <FormControl fullWidth>
-                  <InputLabel>Payment Channel</InputLabel>
-                  <Select
-                    value={contribForm.payment_channel}
-                    label="Payment Channel"
-                    onChange={e => setContribForm(f => ({ ...f, payment_channel: e.target.value }))}
-                  >
-                    {PAYMENT_CHANNELS.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
-                  </Select>
-                </FormControl>
-                <TextField
-                  label="Reference Number (M-Pesa code, etc.)"
-                  value={contribForm.reference_number}
-                  onChange={e => setContribForm(f => ({ ...f, reference_number: e.target.value }))}
-                  fullWidth
-                />
+                {contribForm.entry_mode === 'INDIVIDUAL' ? (
+                  <>
+                    <FormControl fullWidth>
+                      <InputLabel>Payment Channel</InputLabel>
+                      <Select
+                        value={contribForm.payment_channel}
+                        label="Payment Channel"
+                        onChange={e => setContribForm(f => ({ ...f, payment_channel: e.target.value }))}
+                      >
+                        {PAYMENT_CHANNELS.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
+                      </Select>
+                    </FormControl>
+                    <TextField
+                      label="Reference Number (M-Pesa code, etc.)"
+                      value={contribForm.reference_number}
+                      onChange={e => setContribForm(f => ({ ...f, reference_number: e.target.value }))}
+                      fullWidth
+                    />
+                  </>
+                ) : (
+                  <Alert severity="warning">
+                    This will be saved as a {contribForm.entry_mode === 'MANUAL' ? 'manual backfill' : 'cash summary'} entry.
+                  </Alert>
+                )}
               </>
             )}
             <TextField
-              label="Notes"
+              label={(!contribForm.is_pledge && contribForm.entry_mode !== 'INDIVIDUAL') ? 'Reason / Source Note *' : 'Notes'}
               value={contribForm.notes}
               onChange={e => setContribForm(f => ({ ...f, notes: e.target.value }))}
               multiline
@@ -725,7 +804,13 @@ const ClusterDetailsPage: React.FC = () => {
           <Button
             variant="contained"
             onClick={handleSaveContrib}
-            disabled={!canManageClusterTransactions || addContribMutation.isPending || !contribForm.contributor_name || !contribForm.amount}
+            disabled={
+              !canManageClusterTransactions ||
+              addContribMutation.isPending ||
+              !(contribForm.is_pledge || contribForm.entry_mode !== 'INDIVIDUAL' ? true : contribForm.contributor_name) ||
+              !contribForm.amount ||
+              (!contribForm.is_pledge && contribForm.entry_mode !== 'INDIVIDUAL' && !contribForm.notes.trim())
+            }
           >
             {addContribMutation.isPending ? 'Saving...' : 'Save'}
           </Button>

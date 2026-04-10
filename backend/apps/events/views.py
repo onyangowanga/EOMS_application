@@ -817,7 +817,7 @@ class ClusterGroupViewSet(viewsets.ModelViewSet):
         """Return appropriate serializer based on action"""
         if self.action == 'list':
             return ClusterGroupListSerializer
-        elif self.action == 'create':
+        elif self.action in ['create', 'update', 'partial_update']:
             return ClusterGroupCreateSerializer
         else:
             return ClusterGroupDetailSerializer

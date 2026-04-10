@@ -54,11 +54,12 @@ class CollectionCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating collections with Phase 5 fields"""
     
     committee_id = serializers.IntegerField(required=False, allow_null=True)
+    recorded_at = serializers.DateTimeField(required=False, allow_null=True, write_only=True)
     
     class Meta:
         model = Collection
         fields = [
-            'event', 'cluster', 'committee_id', 'source_type',
+            'event', 'cluster', 'committee_id', 'source_type', 'recorded_at',
             'payer_name', 'payer_phone', 'amount',
             'channel', 'reference_number', 'description'
         ]
@@ -70,6 +71,19 @@ class CollectionCreateSerializer(serializers.ModelSerializer):
                 'cluster': 'Cluster must be specified for CLUSTER source type'
             })
         return data
+
+    def create(self, validated_data):
+        recorded_at = validated_data.pop('recorded_at', None)
+        collection = Collection.objects.create(**validated_data)
+
+        if recorded_at:
+            Collection.objects.filter(pk=collection.pk).update(
+                created_at=recorded_at,
+                updated_at=recorded_at,
+            )
+            collection.refresh_from_db()
+
+        return collection
 
 
 class ExpenseSerializer(serializers.ModelSerializer):

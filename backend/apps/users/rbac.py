@@ -24,6 +24,17 @@ EVENT_MEMBER_TO_RBAC = {
     'MEMBER': ['committee_member'],
 }
 
+ADMIN_OVERRIDE_ROLES = {
+    'executive_admin',
+    'finance_member',
+    'chair',
+    'secretary',
+    'treasurer',
+    'subcommittee_lead',
+    'cluster_lead',
+    'committee_member',
+}
+
 
 def _extract_event_id(request, kwargs):
     for key in ('event_id', 'eventId', 'event'):
@@ -40,6 +51,9 @@ def resolve_user_roles(user, event_id=None):
 
     roles = set(getattr(user, 'roles', []) or [])
     roles.update(LEGACY_TO_RBAC.get(getattr(user, 'role', None), []))
+
+    if getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False) or 'executive_admin' in roles:
+        roles.update(ADMIN_OVERRIDE_ROLES)
 
     if event_id:
         memberships = EventMember.objects.filter(event_id=event_id, user=user, is_active=True)

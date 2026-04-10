@@ -45,13 +45,16 @@ import { committeeService } from '../services/committee.service';
 import { eventService } from '../services/event.service';
 import type { CollectionCreate, ExpenseCreate } from '../types/index';
 import { useAuth } from '../contexts/AuthContext';
-import { parseMpesaMessage } from '../utils/mpesa';
+import { parseMpesaMessage, parseMpesaStatementCsv } from '../utils/mpesa';
 
 interface ParsedPaymentEntry {
   payer_name: string;
   payer_phone?: string;
   amount: number;
   reference_number?: string;
+  recorded_at?: string;
+  transaction_date_text?: string;
+  description?: string;
 }
 
 type CollectionFormState = Partial<CollectionCreate> & {
@@ -70,6 +73,7 @@ const FinancePage: React.FC = () => {
   const [mpesaRawMessage, setMpesaRawMessage] = useState('');
   const [batchRawMessages, setBatchRawMessages] = useState('');
   const [batchParsedEntries, setBatchParsedEntries] = useState<ParsedPaymentEntry[]>([]);
+  const [notice, setNotice] = useState<{ severity: 'success' | 'info' | 'warning' | 'error'; message: string } | null>(null);
   
   const [collectionData, setCollectionData] = useState<CollectionFormState>({
     committee_id: undefined,
@@ -179,6 +183,7 @@ const FinancePage: React.FC = () => {
       reference_number: '',
     });
     setError('');
+    setNotice(null);
     setMpesaRawMessage('');
   };
 
@@ -198,6 +203,7 @@ const FinancePage: React.FC = () => {
       reference_number: parsed.transactionReference || prev.reference_number,
     }));
     setError('');
+    setNotice(null);
   };
 
   const resetExpenseForm = () => {
@@ -209,6 +215,7 @@ const FinancePage: React.FC = () => {
       description: '',
     });
     setError('');
+    setNotice(null);
   };
 
   const handleCreateCollection = () => {
@@ -246,6 +253,10 @@ const FinancePage: React.FC = () => {
         payer_phone: parsed.contributorPhone,
         amount: parsed.amount!,
         reference_number: parsed.transactionReference,
+        transaction_date_text: parsed.transactionDateText,
+        description: parsed.transactionDateText
+          ? `Imported from M-Pesa message. Original transaction date: ${parsed.transactionDateText}`
+          : 'Imported from M-Pesa message.',
       }));
 
     setBatchParsedEntries(parsedEntries);
@@ -256,6 +267,92 @@ const FinancePage: React.FC = () => {
     }
 
     setError('');
+    setNotice({
+      severity: 'success',
+      message: `${parsedEntries.length} M-Pesa messages parsed and ready for import.`,
+    });
+  };
+
+  const handleImportStatementFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      const csvText = await file.text();
+      const { entries, skippedRows, totalRows } = parseMpesaStatementCsv(csvText);
+
+      if (entries.length === 0) {
+        setBatchParsedEntries([]);
+        setError('No incoming completed M-Pesa receipts were found in the selected CSV statement.');
+        setNotice(null);
+        return;
+      }
+
+      const existingReferences = new Set(
+        normalizedCollections
+          .map((collection: any) => String(collection.reference_number || '').trim().toUpperCase())
+          .filter(Boolean)
+      );
+
+      const seenReferences = new Set<string>();
+      let skippedExisting = 0;
+      let skippedDuplicatesInFile = 0;
+
+      const parsedEntries: ParsedPaymentEntry[] = [];
+      for (const entry of entries) {
+        const reference = String(entry.transactionReference || '').trim().toUpperCase();
+
+        if (reference && existingReferences.has(reference)) {
+          skippedExisting += 1;
+          continue;
+        }
+
+        if (reference && seenReferences.has(reference)) {
+          skippedDuplicatesInFile += 1;
+          continue;
+        }
+
+        if (reference) {
+          seenReferences.add(reference);
+        }
+
+        parsedEntries.push({
+          payer_name: entry.contributorName || 'Unknown Payer',
+          payer_phone: entry.contributorPhone,
+          amount: entry.amount || 0,
+          reference_number: reference || undefined,
+          recorded_at: entry.transactionDateIso,
+          transaction_date_text: entry.transactionDateText,
+          description: [
+            'Imported from M-Pesa statement CSV.',
+            entry.transactionDateText ? `Original transaction date: ${entry.transactionDateText}.` : '',
+            entry.details ? `Statement details: ${entry.details}` : '',
+          ].filter(Boolean).join(' '),
+        });
+      }
+
+      setBatchParsedEntries(parsedEntries);
+      setBatchRawMessages('');
+      setError('');
+
+      const summaryParts = [
+        `${parsedEntries.length} receipts ready for import from ${file.name}.`,
+        skippedRows > 0 ? `${skippedRows} non-receipt rows ignored.` : '',
+        skippedExisting > 0 ? `${skippedExisting} existing references skipped.` : '',
+        skippedDuplicatesInFile > 0 ? `${skippedDuplicatesInFile} duplicate references inside the file skipped.` : '',
+        totalRows > 0 ? `${totalRows} statement rows read.` : '',
+      ].filter(Boolean);
+
+      setNotice({ severity: 'success', message: summaryParts.join(' ') });
+    } catch (_error) {
+      setBatchParsedEntries([]);
+      setNotice(null);
+      setError('The CSV statement could not be read. Use the Safaricom statement export without changing the columns.');
+    } finally {
+      event.target.value = '';
+    }
   };
 
   const handleImportBatchMessages = async () => {
@@ -273,12 +370,15 @@ const FinancePage: React.FC = () => {
       financeService.createCollection({
         event: eventId,
         committee_id: collectionData.committee_id,
-        source_type: 'GENERAL',
+        source_type: (collectionData as any).source_type || 'GENERAL',
+        cluster: (collectionData as any).source_type === 'CLUSTER' ? (collectionData as any).cluster : undefined,
         payer_name: entry.payer_name,
         payer_phone: entry.payer_phone || '',
         amount: entry.amount,
         channel: 'MPESA',
         reference_number: entry.reference_number || '',
+        description: entry.description || '',
+        recorded_at: entry.recorded_at,
       })
     );
 
@@ -290,8 +390,16 @@ const FinancePage: React.FC = () => {
 
     if (failed > 0) {
       setError(`${failed} entries failed to import. The rest were saved.`);
+      setNotice({
+        severity: 'warning',
+        message: `${results.length - failed} entries were imported successfully.`,
+      });
     } else {
       setError('');
+      setNotice({
+        severity: 'success',
+        message: `${results.length} entries were imported successfully.`,
+      });
     }
 
     setBatchParsedEntries([]);
@@ -427,7 +535,7 @@ const FinancePage: React.FC = () => {
       {/* Tabs */}
       <Paper sx={{ mb: 2 }}>
         <Tabs value={currentTab} onChange={(_, newValue) => setCurrentTab(newValue)}>
-          <Tab label="Collections" />
+          <Tab label="Collections / Import" />
           <Tab label="Expenses" />
         </Tabs>
       </Paper>
@@ -435,11 +543,86 @@ const FinancePage: React.FC = () => {
       {/* Collections Tab */}
       {currentTab === 0 && (
         <Box>
+          <Box display="flex" justifyContent="flex-end" mb={2}>
+            <Button component="label" variant="contained" startIcon={<UploadIcon />}>
+              Import Statement CSV
+              <input hidden accept=".csv,text/csv" type="file" onChange={handleImportStatementFile} />
+            </Button>
+          </Box>
           <Paper sx={{ p: 2, mb: 2 }}>
-            <Typography variant="h6" sx={{ mb: 1 }}>Direct M-Pesa Bulk Import</Typography>
+            <Typography variant="h6" sx={{ mb: 1 }}>M-Pesa Statement Import</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Paste direct-payment M-Pesa messages (one message per line), then parse and import all as direct receipts.
+              Paste direct-payment M-Pesa messages or upload the Safaricom CSV statement, then preview and import the valid incoming receipts.
             </Typography>
+            {notice && (
+              <Alert severity={notice.severity} sx={{ mb: 2 }}>
+                {notice.message}
+              </Alert>
+            )}
+            {error && (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {error}
+              </Alert>
+            )}
+            <Grid container spacing={2} sx={{ mb: 2 }}>
+              <Grid item xs={12} md={4}>
+                <FormControl fullWidth required>
+                  <InputLabel>Committee</InputLabel>
+                  <Select
+                    value={collectionData.committee_id || ''}
+                    onChange={(e) =>
+                      setCollectionData({ ...collectionData, committee_id: Number(e.target.value) })
+                    }
+                    label="Committee"
+                  >
+                    {committees?.map((committee) => (
+                      <MenuItem key={committee.id} value={committee.id}>
+                        {committee.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <FormControl fullWidth required>
+                  <InputLabel>Source Type</InputLabel>
+                  <Select
+                    value={(collectionData as any).source_type || 'GENERAL'}
+                    onChange={(e) =>
+                      setCollectionData({
+                        ...collectionData,
+                        source_type: e.target.value as any,
+                        cluster: e.target.value === 'CLUSTER' ? (collectionData as any).cluster : undefined,
+                      })
+                    }
+                    label="Source Type"
+                  >
+                    <MenuItem value="GENERAL">Direct (Not from Cluster)</MenuItem>
+                    <MenuItem value="CLUSTER">Cluster Unit</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              {(collectionData as any).source_type === 'CLUSTER' && (
+                <Grid item xs={12} md={4}>
+                  <FormControl fullWidth required>
+                    <InputLabel>Cluster Unit</InputLabel>
+                    <Select
+                      value={(collectionData as any).cluster || ''}
+                      onChange={(e) =>
+                        setCollectionData({ ...collectionData, cluster: e.target.value as any })
+                      }
+                      label="Cluster Unit"
+                    >
+                      {(clusters || []).map((cluster: any) => (
+                        <MenuItem key={cluster.id} value={cluster.id}>
+                          {cluster.name}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+              )}
+            </Grid>
             <TextField
               label="Paste M-Pesa Messages"
               multiline
@@ -452,6 +635,10 @@ const FinancePage: React.FC = () => {
             <Box display="flex" gap={1} mt={2} flexWrap="wrap">
               <Button variant="outlined" startIcon={<AutoParseIcon />} onClick={handleParseBatchMessages}>
                 Parse Messages
+              </Button>
+              <Button component="label" variant="outlined" startIcon={<UploadIcon />}>
+                Load Statement CSV
+                <input hidden accept=".csv,text/csv" type="file" onChange={handleImportStatementFile} />
               </Button>
               <Button
                 variant="contained"
@@ -473,6 +660,7 @@ const FinancePage: React.FC = () => {
                     <TableHead>
                       <TableRow>
                         <TableCell sx={{ width: 60 }}>#</TableCell>
+                        <TableCell sx={{ width: 170 }}>Transaction Date</TableCell>
                         <TableCell>Name</TableCell>
                         <TableCell>Phone</TableCell>
                         <TableCell sx={{ width: 160 }}>Amount</TableCell>
@@ -484,6 +672,7 @@ const FinancePage: React.FC = () => {
                       {batchParsedEntries.map((entry, index) => (
                         <TableRow key={`${entry.reference_number || 'entry'}-${index}`}>
                           <TableCell>{index + 1}</TableCell>
+                          <TableCell>{entry.transaction_date_text || '-'}</TableCell>
                           <TableCell>
                             <TextField
                               value={entry.payer_name}

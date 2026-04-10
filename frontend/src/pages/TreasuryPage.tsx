@@ -49,13 +49,16 @@ import {
 } from '@mui/icons-material';
 import { eventService } from '../services/event.service';
 import type { ExpensePhase6 } from '../types';
-import { parseMpesaMessage } from '../utils/mpesa';
+import { parseMpesaMessage, parseMpesaStatementCsv } from '../utils/mpesa';
 
 interface ParsedPaymentEntry {
   payer_name: string;
   payer_phone?: string;
   amount: number;
   reference_number?: string;
+  recorded_at?: string;
+  transaction_date_text?: string;
+  description?: string;
 }
 
 interface TabPanelProps {
@@ -101,6 +104,7 @@ const TreasuryPage: React.FC = () => {
   const [mpesaRawMessage, setMpesaRawMessage] = useState('');
   const [batchRawMessages, setBatchRawMessages] = useState('');
   const [batchParsedEntries, setBatchParsedEntries] = useState<ParsedPaymentEntry[]>([]);
+  const [importNotice, setImportNotice] = useState<{ severity: 'success' | 'info' | 'warning' | 'error'; message: string } | null>(null);
   const [collectionForm, setCollectionForm] = useState({
     payer_name: '',
     payer_phone: '',
@@ -281,6 +285,7 @@ const TreasuryPage: React.FC = () => {
       setMpesaRawMessage('');
       setBatchRawMessages('');
       setBatchParsedEntries([]);
+      setImportNotice(null);
       setCollectionForm({
         payer_name: '',
         payer_phone: '',
@@ -346,6 +351,7 @@ const TreasuryPage: React.FC = () => {
       channel: 'MPESA',
       reference_number: parsed.transactionReference || current.reference_number,
     }));
+    setImportNotice(null);
   };
 
   const handleParseBatchMessages = () => {
@@ -362,9 +368,99 @@ const TreasuryPage: React.FC = () => {
         payer_phone: parsed.contributorPhone,
         amount: parsed.amount!,
         reference_number: parsed.transactionReference,
+        transaction_date_text: parsed.transactionDateText,
+        description: parsed.transactionDateText
+          ? `Imported from M-Pesa message. Original transaction date: ${parsed.transactionDateText}`
+          : 'Imported from M-Pesa message.',
       }));
 
     setBatchParsedEntries(parsedEntries);
+    setImportNotice(
+      parsedEntries.length > 0
+        ? { severity: 'success', message: `${parsedEntries.length} M-Pesa messages parsed and ready for import.` }
+        : { severity: 'warning', message: 'No valid M-Pesa messages were parsed.' }
+    );
+  };
+
+  const handleImportStatementFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const csvText = await file.text();
+      const { entries, skippedRows, totalRows } = parseMpesaStatementCsv(csvText);
+
+      if (entries.length === 0) {
+        setBatchParsedEntries([]);
+        setImportNotice({
+          severity: 'warning',
+          message: 'No valid incoming receipts were found in the selected CSV statement.',
+        });
+        return;
+      }
+
+      const existingReferences = new Set(
+        normalizedCollections
+          .map((collection) => String((collection as any).reference_number || '').trim().toUpperCase())
+          .filter(Boolean)
+      );
+
+      const seenReferences = new Set<string>();
+      let skippedExisting = 0;
+      let skippedDuplicatesInFile = 0;
+
+      const parsedEntries: ParsedPaymentEntry[] = [];
+      for (const entry of entries) {
+        const reference = String(entry.transactionReference || '').trim().toUpperCase();
+
+        if (reference && existingReferences.has(reference)) {
+          skippedExisting += 1;
+          continue;
+        }
+
+        if (reference && seenReferences.has(reference)) {
+          skippedDuplicatesInFile += 1;
+          continue;
+        }
+
+        if (reference) seenReferences.add(reference);
+
+        parsedEntries.push({
+          payer_name: entry.contributorName || 'Unknown Payer',
+          payer_phone: entry.contributorPhone,
+          amount: entry.amount || 0,
+          reference_number: reference || undefined,
+          recorded_at: entry.transactionDateIso,
+          transaction_date_text: entry.transactionDateText,
+          description: [
+            'Imported from M-Pesa statement CSV.',
+            entry.transactionDateText ? `Original transaction date: ${entry.transactionDateText}.` : '',
+            entry.details ? `Statement details: ${entry.details}` : '',
+          ].filter(Boolean).join(' '),
+        });
+      }
+
+      setBatchParsedEntries(parsedEntries);
+      setBatchRawMessages('');
+      setImportNotice({
+        severity: 'success',
+        message: [
+          `${parsedEntries.length} receipts ready for import from ${file.name}.`,
+          skippedRows > 0 ? `${skippedRows} non-receipt rows ignored.` : '',
+          skippedExisting > 0 ? `${skippedExisting} existing references skipped.` : '',
+          skippedDuplicatesInFile > 0 ? `${skippedDuplicatesInFile} duplicate references in the file skipped.` : '',
+          totalRows > 0 ? `${totalRows} rows read.` : '',
+        ].filter(Boolean).join(' '),
+      });
+    } catch (_error) {
+      setBatchParsedEntries([]);
+      setImportNotice({
+        severity: 'error',
+        message: 'The selected CSV could not be read. Use the polished or Safaricom statement export format.',
+      });
+    } finally {
+      event.target.value = '';
+    }
   };
 
   const handleUpdateParsedEntry = (
@@ -402,6 +498,8 @@ const TreasuryPage: React.FC = () => {
         amount: entry.amount,
         channel: 'MPESA',
         reference_number: entry.reference_number || undefined,
+        description: entry.description || undefined,
+        recorded_at: entry.recorded_at,
       })
     );
 
@@ -410,6 +508,7 @@ const TreasuryPage: React.FC = () => {
     queryClient.invalidateQueries({ queryKey: ['financial-summary'] });
     setBatchParsedEntries([]);
     setBatchRawMessages('');
+    setImportNotice({ severity: 'success', message: 'Parsed entries imported to treasury.' });
   };
 
   // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -924,18 +1023,29 @@ const TreasuryPage: React.FC = () => {
               <Typography variant="subtitle1" fontWeight="bold">
                 Record and review incoming collections
               </Typography>
-              <Button
-                variant="contained"
-                startIcon={<MoneyIcon />}
-                onClick={() => setCollectionDialog(true)}
-                disabled={!mainCommittee}
-              >
-                Record Payment Received
-              </Button>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                <Button component="label" variant="outlined" startIcon={<UploadIcon />} disabled={!mainCommittee}>
+                  Import Statement CSV
+                  <input hidden accept=".csv,text/csv" type="file" onChange={handleImportStatementFile} />
+                </Button>
+                <Button
+                  variant="contained"
+                  startIcon={<MoneyIcon />}
+                  onClick={() => setCollectionDialog(true)}
+                  disabled={!mainCommittee}
+                >
+                  Record Payment Received
+                </Button>
+              </Stack>
             </Stack>
             {!mainCommittee && (
               <Alert severity="warning" sx={{ mt: 1 }}>
                 Main committee not found for this event. Create one first to record general collections.
+              </Alert>
+            )}
+            {importNotice && (
+              <Alert severity={importNotice.severity} sx={{ mt: 1 }}>
+                {importNotice.message}
               </Alert>
             )}
           </Box>
@@ -1319,6 +1429,10 @@ const TreasuryPage: React.FC = () => {
               <Button variant="outlined" startIcon={<AutoParseIcon />} onClick={handleParseBatchMessages}>
                 Parse Bulk Messages
               </Button>
+              <Button component="label" variant="outlined" startIcon={<UploadIcon />}>
+                Load Statement CSV
+                <input hidden accept=".csv,text/csv" type="file" onChange={handleImportStatementFile} />
+              </Button>
               <Button
                 variant="contained"
                 startIcon={<UploadIcon />}
@@ -1335,6 +1449,7 @@ const TreasuryPage: React.FC = () => {
                   <TableHead>
                     <TableRow>
                       <TableCell>#</TableCell>
+                      <TableCell>Transaction Date</TableCell>
                       <TableCell>Name</TableCell>
                       <TableCell>Phone</TableCell>
                       <TableCell>Amount</TableCell>
@@ -1346,6 +1461,7 @@ const TreasuryPage: React.FC = () => {
                     {batchParsedEntries.map((entry, index) => (
                       <TableRow key={`${entry.reference_number || 'payment'}-${index}`}>
                         <TableCell>{index + 1}</TableCell>
+                        <TableCell>{entry.transaction_date_text || '-'}</TableCell>
                         <TableCell>
                           <TextField
                             size="small"
